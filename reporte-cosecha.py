@@ -11,7 +11,7 @@ col_logo_izq, col_espacio, col_logo_der = st.columns([1, 4, 1])
 with col_logo_izq:
     st.image("CSC.png", width=150)
 with col_logo_der:
-    st.image("JD.png", width=100)
+    st.image("JD.png", width=170)
 
 # --- SIDEBAR: CONFIGURACIÓN ---
 st.sidebar.header("⚙️ Configuración del Reporte")
@@ -93,7 +93,7 @@ if activar_historico:
     archivo_historico = st.sidebar.file_uploader("Subir archivo CSV Histórico", type=["csv"])
     if archivo_historico:
         df_h_raw = pd.read_csv(archivo_historico)
-        meses_map = {'ene': 1, 'feb': 2, 'mar': 3, 'abr': 4, 'may': 5, 'jun': 6, 'jul': 7, 'ago': 8, 'sep': 9,
+        meses_map = {'ene': 1, 'feb': 2, 'mar': 3, 'abr': 4, 'may': 5, 'jun': 6, 'jul': 7, 'ago': 8, 'sept': 9,
                      'oct': 10, 'nov': 11, 'dic': 12}
 
 
@@ -112,7 +112,7 @@ if activar_historico:
 
 # --- CUERPO DEL INFORME ---
 if archivo_subido is not None and not df_final.empty:
-    st.title("🚜 Auditoría de Impacto Tecnológico - Centro de Soluciones Conci")
+    st.title("🚜 Auditoría de Tecnología en Cosechadoras")
     st.subheader(f"Análisis para: {razon_social_input if razon_social_input else 'Flota Seleccionada'}")
 
     total_has_segmento = df_final['Superficie cosechada'].sum()
@@ -194,10 +194,10 @@ if archivo_subido is not None and not df_final.empty:
             pot_t = ah_total + t_oculto
             st.markdown(f"<h3 style='color: #28a745; margin-bottom: 0;'>USD {ah_total:,.0f}</h3>",
                         unsafe_allow_html=True)
-            st.caption(f"Ahorro Real")
+            st.caption(f"Ahorro Real por uso de la Tecnología")
             st.markdown(f"<h3 style='color: #dc3545; margin-bottom: 0;'>USD {t_oculto:,.0f}</h3>",
                         unsafe_allow_html=True)
-            st.caption("Costo Oculto")
+            st.caption("Costo Oculto - Impacto por falta de uso de la Tecnología")
             st.markdown(f"<h3 style='color: #007bff; margin-bottom: 0;'>USD {pot_t:,.0f}</h3>", unsafe_allow_html=True)
             st.caption("Potencial Total")
             efic = (ah_total / pot_t * 100) if pot_t > 0 else 0
