@@ -79,6 +79,8 @@ with st.sidebar.expander("Configurar Rotos e Impurezas"):
     r_psa_c = st.number_input("% Rotos c/PSA", value=1.5)
     i_psa_s = st.number_input("% Imp. s/PSA", value=1.5);
     i_psa_c = st.number_input("% Imp. c/PSA", value=1.0)
+    st.info(
+        "[Link Cámara Arbitral BCR](https://www.cac.bcr.com.ar/es/arbitraje-y-calidad/liquidacion-y-mermas/liquidacion-de-mercaderia)")
 
 castigo_am = st.sidebar.number_input("% Castigo sin AM", value=1.5) / 100
 castigo_psa = st.sidebar.number_input("% Castigo sin PSA", value=1.0) / 100
@@ -141,7 +143,19 @@ if archivo_subido is not None and not df_final.empty:
                                   default=sorted(list(df_final['Nombre de máquina'].unique())))
 
     if maquinas_sel:
-        total_has_maquinas = df_final[df_final['Nombre de máquina'].isin(maquinas_sel)]['Superficie cosechada'].sum()
+        df_maquinas = df_final[df_final['Nombre de máquina'].isin(maquinas_sel)]
+        total_has_maquinas = df_maquinas['Superficie cosechada'].sum()
+
+        # --- CALCULO ROI ACTUAL ---
+        t_ahorro_c = 0.0;
+        t_ahorro_g = 0.0;
+        t_oculto = 0.0
+        tecs_av = set();
+        tecs_aj = set()
+
+        # Para sincronizar con el histórico, necesitamos un valor unitario promedio ponderado de la flota seleccionada
+        valor_grano_unit_ponderado = 0.0
+
         h1, h2, h3, h4, h5, h6 = st.columns([1.5, 1, 1.5, 1, 1.5, 1])
         h1.caption("**Máquina**");
         h2.caption("**Has**");
@@ -150,14 +164,8 @@ if archivo_subido is not None and not df_final.empty:
         h5.caption("**Tec. Ajuste**");
         h6.caption("**% Uso**")
 
-        t_ahorro_c = 0.0;
-        t_ahorro_g = 0.0;
-        t_oculto = 0.0
-        tecs_av = set();
-        tecs_aj = set()
-
         for maq in maquinas_sel:
-            df_m = df_final[df_final['Nombre de máquina'] == maq]
+            df_m = df_maquinas[df_maquinas['Nombre de máquina'] == maq]
             h_m = df_m['Superficie cosechada'].sum()
             cult_p = df_m.groupby('Tipo de cultivo')['Superficie cosechada'].sum().idxmax()
             rto_ref = dict_rtos[cult_p]
@@ -176,6 +184,7 @@ if archivo_subido is not None and not df_final.empty:
             if t2 != "Sin Tecnología" and u2 > 0: tecs_aj.add(t2)
 
             v_c = (ah_hs_l_ha if t1 == "HarvestSmart" else (ah_pgsa_l_ha if t1 == "PGSA" else 0)) * precio_gasoil
+
             v_g = 0
             if t2 == "AutoMaintain":
                 v_g = (((p_sin_am - p_con_am) / 1000) * precio_grano_usd) + (precio_grano_usd * rto_ref * castigo_am)
@@ -186,6 +195,9 @@ if archivo_subido is not None and not df_final.empty:
             t_ahorro_g += (h_m * (u2 / 100) * v_g)
             t_oculto += (h_m * (1 - u1 / 100) * v_c) + (h_m * (1 - u2 / 100) * v_g)
 
+            # Ponderación para el histórico
+            valor_grano_unit_ponderado += (v_g * (h_m / total_has_maquinas))
+
         st.markdown("---")
         col_res, col_param, col_pie = st.columns([1, 1, 1])
         with col_res:
@@ -194,10 +206,10 @@ if archivo_subido is not None and not df_final.empty:
             pot_t = ah_total + t_oculto
             st.markdown(f"<h3 style='color: #28a745; margin-bottom: 0;'>USD {ah_total:,.0f}</h3>",
                         unsafe_allow_html=True)
-            st.caption(f"Ahorro Real por uso de la Tecnología")
+            st.caption(f"Ahorro Real")
             st.markdown(f"<h3 style='color: #dc3545; margin-bottom: 0;'>USD {t_oculto:,.0f}</h3>",
                         unsafe_allow_html=True)
-            st.caption("Costo Oculto - Impacto por falta de uso de la Tecnología")
+            st.caption("Costo Oculto")
             st.markdown(f"<h3 style='color: #007bff; margin-bottom: 0;'>USD {pot_t:,.0f}</h3>", unsafe_allow_html=True)
             st.caption("Potencial Total")
             efic = (ah_total / pot_t * 100) if pot_t > 0 else 0
@@ -221,71 +233,59 @@ if archivo_subido is not None and not df_final.empty:
             fig_pie.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=230);
             st.plotly_chart(fig_pie, use_container_width=True)
 
-    # --- SECCIÓN HISTÓRICO Y COMPARATIVA ---
-    if activar_historico and archivo_historico and rango_hist:
-        st.divider()
-        st.subheader("📈 Evolución de Adopción Tecnológica")
+        # --- SECCIÓN HISTÓRICO Y COMPARATIVA ---
+        if activar_historico and archivo_historico and rango_hist:
+            st.divider()
+            st.subheader("📈 Evolución de Adopción Tecnológica")
+            idx_inicio = fechas_ordenadas.index(rango_hist[0])
+            idx_fin = fechas_ordenadas.index(rango_hist[1])
+            fechas_rango = fechas_ordenadas[idx_inicio:idx_fin + 1]
+            df_h = df_h_raw[df_h_raw['Fecha de terminación (Año y mes)'].isin(fechas_rango)].copy()
+            df_h['temp_date'] = df_h['Fecha de terminación (Año y mes)'].apply(parse_fecha)
+            df_h = df_h.sort_values('temp_date')
 
-        # Sincronizamos con las fechas ordenadas
-        idx_inicio = fechas_ordenadas.index(rango_hist[0])
-        idx_fin = fechas_ordenadas.index(rango_hist[1])
+            fig_h = go.Figure()
+            fig_h.add_trace(
+                go.Scatter(x=df_h['Fecha de terminación (Año y mes)'], y=df_h['Auto Maintain Activado (%)'] * 100,
+                           mode='lines+markers', name='Auto Maintain', line=dict(color='#367C2B', width=3)))
+            fig_h.add_trace(
+                go.Scatter(x=df_h['Fecha de terminación (Año y mes)'], y=df_h['Harvest Smart Activado (%)'] * 100,
+                           mode='lines+markers', name='Harvest Smart', line=dict(color='#FFDE00', width=3)))
+            fig_h.update_layout(hovermode="x unified", yaxis_title="Uso (%)", template="plotly_white")
+            st.plotly_chart(fig_h, use_container_width=True)
 
-        # Filtramos el histórico usando la lista maestra de fechas ordenadas
-        fechas_rango = fechas_ordenadas[idx_inicio:idx_fin + 1]
-        df_h = df_h_raw[df_h_raw['Fecha de terminación (Año y mes)'].isin(fechas_rango)].copy()
+            st.subheader("🔄 Comparativa de Impacto: Inicio vs. Final del Periodo")
+            st.info(f"Análisis basado en las **{total_has_maquinas:,.1f} Has** de las máquinas seleccionadas.")
 
-        # Aseguramos que el DF del gráfico también esté ordenado
-        df_h['temp_date'] = df_h['Fecha de terminación (Año y mes)'].apply(parse_fecha)
-        df_h = df_h.sort_values('temp_date')
-
-        fig_h = go.Figure()
-        fig_h.add_trace(
-            go.Scatter(x=df_h['Fecha de terminación (Año y mes)'], y=df_h['Auto Maintain Activado (%)'] * 100,
-                       mode='lines+markers', name='Auto Maintain', line=dict(color='#367C2B', width=3)))
-        fig_h.add_trace(
-            go.Scatter(x=df_h['Fecha de terminación (Año y mes)'], y=df_h['Harvest Smart Activado (%)'] * 100,
-                       mode='lines+markers', name='Harvest Smart', line=dict(color='#FFDE00', width=3)))
-        fig_h.update_layout(hovermode="x unified", yaxis_title="Uso (%)", template="plotly_white")
-        st.plotly_chart(fig_h, use_container_width=True)
-
-        st.subheader("🔄 Comparativa de Impacto: Inicio vs. Final del Periodo")
-        st.info(f"Análisis basado en las **{total_has_maquinas:,.1f} Has** de las máquinas seleccionadas.")
-
-        h_inicio = df_h.iloc[0];
-        h_fin = df_h.iloc[-1]
-        rto_promedio_flota = sum(dict_rtos.values()) / len(dict_rtos) if dict_rtos else 0
-        pot_c_unit = (
-                         ah_hs_l_ha if "HarvestSmart" in tecs_av else ah_pgsa_l_ha if "PGSA" in tecs_av else ah_hs_l_ha) * precio_gasoil
-
-        pot_g_unit = 0
-        if "AutoMaintain" in tecs_aj or not tecs_aj:
-            pot_g_unit = (((p_sin_am - p_con_am) / 1000) * precio_grano_usd) + (
-                        precio_grano_usd * rto_promedio_flota * castigo_am)
-        elif "PSA" in tecs_aj:
-            pot_g_unit = (((p_sin_psa - p_con_psa) / 1000) * precio_grano_usd) + (
-                        precio_grano_usd * rto_promedio_flota * castigo_psa)
+            # Valor unitario de combustible promedio (según selección T1 de la auditoria actual)
+            pot_c_unit = (
+                             ah_hs_l_ha if "HarvestSmart" in tecs_av else ah_pgsa_l_ha if "PGSA" in tecs_av else ah_hs_l_ha) * precio_gasoil
 
 
-        def calcular_impacto(row):
-            ahorro = (total_has_maquinas * row['Harvest Smart Activado (%)'] * pot_c_unit) + (
-                        total_has_maquinas * row['Auto Maintain Activado (%)'] * pot_g_unit)
-            oculto = (total_has_maquinas * (1 - row['Harvest Smart Activado (%)']) * pot_c_unit) + (
-                        total_has_maquinas * (1 - row['Auto Maintain Activado (%)']) * pot_g_unit)
-            return ahorro, oculto
+            # El valor de grano unitario ya lo calculamos arriba ponderado por máquina/cultivo real
+
+            def calcular_impacto(row):
+                ahorro = (total_has_maquinas * row['Harvest Smart Activado (%)'] * pot_c_unit) + (
+                            total_has_maquinas * row['Auto Maintain Activado (%)'] * valor_grano_unit_ponderado)
+                oculto = (total_has_maquinas * (1 - row['Harvest Smart Activado (%)']) * pot_c_unit) + (
+                            total_has_maquinas * (1 - row['Auto Maintain Activado (%)']) * valor_grano_unit_ponderado)
+                return ahorro, oculto
 
 
-        ah_ini, oc_ini = calcular_impacto(h_inicio)
-        ah_fin, oc_fin = calcular_impacto(h_fin)
+            h_inicio = df_h.iloc[0];
+            h_fin = df_h.iloc[-1]
+            ah_ini, oc_ini = calcular_impacto(h_inicio)
+            ah_fin, oc_fin = calcular_impacto(h_fin)
 
-        comp1, comp2 = st.columns(2)
-        with comp1:
-            st.markdown(f"**Estado al {h_inicio['Fecha de terminación (Año y mes)']}**")
-            st.metric("Ahorro Real", f"USD {ah_ini:,.0f}");
-            st.metric("Costo Oculto", f"USD {oc_ini:,.0f}")
-        with comp2:
-            st.markdown(f"**Estado al {h_fin['Fecha de terminación (Año y mes)']}**")
-            st.metric("Ahorro Real", f"USD {ah_fin:,.0f}", delta=f"↑ USD {ah_fin - ah_ini:,.0f}");
-            st.metric("Costo Oculto", f"USD {oc_fin:,.0f}")
+            comp1, comp2 = st.columns(2)
+            with comp1:
+                st.markdown(f"**Estado al {h_inicio['Fecha de terminación (Año y mes)']}**")
+                st.metric("Ahorro Real", f"USD {ah_ini:,.0f}");
+                st.metric("Costo Oculto", f"USD {oc_ini:,.0f}")
+            with comp2:
+                st.markdown(f"**Estado al {h_fin['Fecha de terminación (Año y mes)']}**")
+                st.metric("Ahorro Real", f"USD {ah_fin:,.0f}", delta=f"↑ USD {ah_fin - ah_ini:,.0f}");
+                st.metric("Costo Oculto", f"USD {oc_fin:,.0f}")
 
     with st.expander("📂 Ver registros detallados"):
         st.dataframe(df_final, use_container_width=True)
