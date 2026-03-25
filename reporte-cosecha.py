@@ -2,215 +2,292 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
-# --- CONFIGURACIÓN DE LA PÁGINA ---
-st.set_page_config(page_title="Reporte Cosecha | Conci", layout="wide", page_icon="🚜")
+# --- 1. CONFIGURACIÓN DE LA PÁGINA ---
+st.set_page_config(page_title="Reporte Impacto Tecnológico", page_icon="🚜", layout="wide")
 
 # --- 2. LOGOS SUPERIORES ---
-# Creamos 3 columnas para empujar los logos a las puntas
 col_logo_izq, col_espacio, col_logo_der = st.columns([1, 4, 1])
-
 with col_logo_izq:
-    # Logo del concesionario
     st.image("CSC.png", width=150)
-
 with col_logo_der:
-    # Logo de John Deere
-    st.image("JD.png", width=170)
+    st.image("JD.png", width=100)
 
-# --- SIDEBAR: ENTRADA DE DATOS Y FILTROS ---
-st.sidebar.header("Configuración del Reporte")
-archivo_subido = st.sidebar.file_uploader("Subir Excel de Cosecha (CSV o XLSX)", type=["xlsx", "csv"])
+# --- SIDEBAR: CONFIGURACIÓN ---
+st.sidebar.header("⚙️ Configuración del Reporte")
+archivo_subido = st.sidebar.file_uploader("Subir Excel de Cosecha", type=["xlsx", "csv"])
 razon_social_input = st.sidebar.text_input("Razón Social del Cliente", placeholder="Ej: Agropecuaria El Ombú S.A.")
 
-umbral_has = st.sidebar.number_input(
-    "Filtrar labores menores a (Has):",
-    min_value=0.0, value=2.0, step=0.5
-)
+umbral_has = st.sidebar.number_input("Filtrar labores menores a (Has):", min_value=0.0, value=2.0, step=0.5)
 
-# --- CARGA Y PROCESAMIENTO ---
+df_final = pd.DataFrame()
+
 if archivo_subido is not None:
     try:
-        if archivo_subido.name.endswith('.csv'):
-            df = pd.read_csv(archivo_subido)
-        else:
-            df = pd.read_excel(archivo_subido)
-
+        df = pd.read_csv(archivo_subido) if archivo_subido.name.endswith('.csv') else pd.read_excel(archivo_subido)
+        df.columns = df.columns.str.strip()
         df_base = df[df['Superficie cosechada'] >= umbral_has].copy()
 
-        # FILTROS DE UBICACIÓN
-        st.sidebar.subheader("Filtros de Ubicación")
-        lista_clientes = ["Todos"] + sorted(list(df_base['Clientes'].unique()))
-        cliente_sel = st.sidebar.selectbox("Cliente", lista_clientes)
-        df_filt = df_base.copy()
-        if cliente_sel != "Todos": df_filt = df_filt[df_filt['Clientes'] == cliente_sel]
+        with st.sidebar.expander("📍 Filtros de Segmentación", expanded=False):
+            c_sel = st.multiselect("Cliente:", options=sorted(df_base['Clientes'].unique()),
+                                   default=sorted(df_base['Clientes'].unique()))
+            df_c = df_base[df_base['Clientes'].isin(c_sel)]
+            g_sel = st.multiselect("Granja:", options=sorted(df_c['Granjas'].unique()),
+                                   default=sorted(df_c['Granjas'].unique()))
+            df_g = df_c[df_c['Granjas'].isin(g_sel)]
+            ca_sel = st.multiselect("Campo:", options=sorted(df_g['Campos'].unique()),
+                                    default=sorted(df_g['Campos'].unique()))
+            df_ca = df_g[df_g['Campos'].isin(ca_sel)]
+            cu_sel = st.multiselect("Cultivo:", options=sorted(df_ca['Tipo de cultivo'].unique()),
+                                    default=sorted(df_ca['Tipo de cultivo'].unique()))
 
-        lista_granjas = ["Todas"] + sorted(list(df_filt['Granjas'].unique()))
-        granja_sel = st.sidebar.selectbox("Granja", lista_granjas)
-        if granja_sel != "Todas": df_filt = df_filt[df_filt['Granjas'] == granja_sel]
-
-        lista_campos = ["Todos"] + sorted(list(df_filt['Campos'].unique()))
-        campo_sel = st.sidebar.selectbox("Campo", lista_campos)
-        if campo_sel != "Todos": df_filt = df_filt[df_filt['Campos'] == campo_sel]
-
-        # SECCIÓN DE TECNOLOGÍA EN EL SIDEBAR (Abajo de todo)
-        st.sidebar.divider()
-        ver_tecnologia = st.sidebar.checkbox("Añadir Tecnología de Cosecha")
-
-        # Variables de ROI con valores estándar
-        ah_hs = 0.6;
-        ah_pgsa = 0.6;
-        cal_am = 20.0;
-        cal_pgsa = 20.0
-
-        if ver_tecnologia:
-            st.sidebar.subheader("Configuración ROI (USD/ha)")
-            ah_hs = st.sidebar.number_input("Ahorro Combustible HarvestSmart", value=0.6)
-            ah_pgsa = st.sidebar.number_input("Ahorro Combustible PGSA", value=0.6)
-            cal_am = st.sidebar.number_input("Calidad/Pérdidas AutoMaintain", value=20.0)
-            cal_pgsa = st.sidebar.number_input("Calidad/Pérdidas HSA", value=20.0)
-
-        if not df_filt.empty:
-            df_filt['Primera cosecha'] = pd.to_datetime(df_filt['Primera cosecha'])
-            df_filt['Último cosechado'] = pd.to_datetime(df_filt['Último cosechado'])
-
-            # --- SECCIÓN 1: CABECERA Y KPIs ---
-            st.title("🚜 Reporte de Cosecha")
-            titulo_cliente = razon_social_input if razon_social_input else (
-                cliente_sel if cliente_sel != "Todos" else "Flota Total")
-            st.subheader(f"Análisis para: {titulo_cliente}")
-
-            total_has = df_filt['Superficie cosechada'].sum()
-            total_comb = df_filt['Combustible total'].sum()
-            c_prom = total_comb / total_has if total_has > 0 else 0
-
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Inicio", df_filt['Primera cosecha'].min().strftime('%d/%m/%Y'))
-            c2.metric("Fin", df_filt['Último cosechado'].max().strftime('%d/%m/%Y'))
-            c3.metric("Total Hectáreas", f"{total_has:,.2f} Has")
-            c4.metric("Combustible", f"{total_comb:,.0f} Lts", delta=f"{c_prom:.2f} L/Ha", delta_color="inverse")
-
-            st.divider()
-
-            # --- SECCIÓN 2: EVOLUCIÓN TEMPORAL (RESTAURADO) ---
-            st.subheader("📅 Evolución Diaria y Acumulada")
-            df_diario = df_filt.groupby(df_filt['Último cosechado'].dt.date)['Superficie cosechada'].sum().reset_index()
-            df_diario.columns = ['Fecha', 'Hectareas']
-            df_diario['Acumulado'] = df_diario['Hectareas'].cumsum()
-
-            fig_temp = make_subplots(specs=[[{"secondary_y": True}]])
-            fig_temp.add_trace(
-                go.Bar(x=df_diario['Fecha'], y=df_diario['Hectareas'], name="Has/Día", marker_color='#2ca02c',
-                       opacity=0.7), secondary_y=False)
-            fig_temp.add_trace(
-                go.Scatter(x=df_diario['Fecha'], y=df_diario['Acumulado'], name="Acumulado", mode='lines+markers',
-                           line=dict(color='#1f77b4', width=3)), secondary_y=True)
-            st.plotly_chart(fig_temp, use_container_width=True)
-
-            # --- SECCIÓN 3: DESEMPEÑO DE FLOTA (RESTAURADO) ---
-            st.subheader("⚙️ Desempeño de Flota y Operadores")
-            col_izq, col_der = st.columns(2)
-            with col_izq:
-                df_maq_graf = df_filt.groupby('Nombre de máquina')[
-                    'Superficie cosechada'].sum().reset_index().sort_values('Superficie cosechada', ascending=False)
-                st.plotly_chart(
-                    px.bar(df_maq_graf, x='Nombre de máquina', y='Superficie cosechada', title="Hectáreas por Máquina",
-                           color_discrete_sequence=['#ff7f0e']), use_container_width=True)
-            with col_der:
-                df_op = df_filt.groupby('Operadores')['Superficie cosechada'].sum().reset_index().sort_values(
-                    'Superficie cosechada', ascending=False)
-                st.plotly_chart(px.bar(df_op, x='Operadores', y='Superficie cosechada', title="Hectáreas por Operador",
-                                       color_discrete_sequence=['#9467bd']), use_container_width=True)
-
-            # --- SECCIÓN 4: BOXPLOT FLUJO (t/h) ---
-            st.subheader("📈 Eficiencia de Alimentación (t/h)")
-            st.plotly_chart(px.box(df_filt, x='Nombre de máquina', y='Rendimiento (húmedo)', color='Nombre de máquina',
-                                   points="all"), use_container_width=True)
-
-            # --- SECCIÓN 5: ANÁLISIS AGRONÓMICO (RESTAURADO) ---
-            st.divider()
-            st.subheader("🌱 Análisis por Cultivo y Variedad")
-            lista_cultivos = ["Todos"] + sorted(list(df_filt['Tipo de cultivo'].unique()))
-            cult_sel = st.selectbox("Filtrar por cultivo:", lista_cultivos)
-            df_cul = df_filt if cult_sel == "Todos" else df_filt[df_filt['Tipo de cultivo'] == cult_sel]
-            label_x = 'Tipo de cultivo' if cult_sel == "Todos" else 'Variedades'
-
-            c_a1, c_a2, c_a3 = st.columns(3)
-            with c_a1:
-                st.plotly_chart(px.bar(df_cul.groupby(label_x)['Superficie cosechada'].sum().reset_index(), x=label_x,
-                                       y='Superficie cosechada', title="Superficie (Has)",
-                                       color_discrete_sequence=['#2ca02c']), use_container_width=True)
-            with c_a2:
-                st.plotly_chart(
-                    px.bar(df_cul.groupby(label_x)['Peso húmedo'].mean().reset_index(), x=label_x, y='Peso húmedo',
-                           title="Rinde (t/ha)", color_discrete_sequence=['#8bc34a']), use_container_width=True)
-            with c_a3:
-                st.plotly_chart(
-                    px.bar(df_cul.groupby(label_x)['Índice de combustible (área)'].mean().reset_index(), x=label_x,
-                           y='Índice de combustible (área)', title="Consumo (L/ha)",
-                           color_discrete_sequence=['#ff7f0e']), use_container_width=True)
-
-            # BOXPLOT VARIEDAD (RESTAURADO)
-            st.write(f"**Estabilidad de Rinde por Variedad ({cult_sel}) - t/ha**")
-            st.plotly_chart(px.box(df_cul, x='Variedades', y='Peso húmedo', color='Variedades', points="all"),
-                            use_container_width=True)
-
-            # --- SECCIÓN 6: TECNOLOGÍA Y ROI ---
-            if ver_tecnologia:
-                st.divider()
-                st.subheader("🛠️ Auditoría Tecnológica e Impacto Económico")
-
-                maquinas_disponibles = sorted(list(df_filt['Nombre de máquina'].unique()))
-                maquinas_sel = st.multiselect("Máquinas a auditar:", maquinas_disponibles, default=maquinas_disponibles)
-
-                if maquinas_sel:
-                    h1, h2, h3, h4, h5, h6 = st.columns([1.5, 1, 1.5, 1, 1.5, 1])
-                    h1.caption("**Máquina**");
-                    h2.caption("**Has**");
-                    h3.caption("**Tec. Avance**");
-                    h4.caption("**% Uso**");
-                    h5.caption("**Tec. Ajuste**");
-                    h6.caption("**% Uso**")
-
-                    total_ahorro = 0.0;
-                    total_oculto = 0.0
-
-                    for maq in maquinas_sel:
-                        h_m = df_filt[df_filt['Nombre de máquina'] == maq]['Superficie cosechada'].sum()
-                        r1, r2, r3, r4, r5, r6 = st.columns([1.5, 1, 1.5, 1, 1.5, 1])
-
-                        r1.write(f"**{maq}**");
-                        r2.write(f"{h_m:,.1f}")
-                        t1 = r3.selectbox(f"T1_{maq}", ["HarvestSmart", "PGSA", "Sin Tecnología"], key=f"t1_{maq}",
-                                          label_visibility="collapsed")
-                        u1 = r4.number_input(f"U1_{maq}", 0, 100, 0, step=5, key=f"u1_{maq}",
-                                             label_visibility="collapsed")
-                        t2 = r5.selectbox(f"T2_{maq}", ["AutoMaintain", "HSA", "Sin Tecnología"], key=f"t2_{maq}",
-                                          label_visibility="collapsed")
-                        u2 = r6.number_input(f"U2_{maq}", 0, 100, 0, step=5, key=f"u2_{maq}",
-                                             label_visibility="collapsed")
-
-                        # Cálculo ROI
-                        v1 = ah_hs if t1 == "HarvestSmart" else (ah_pgsa if t1 == "PGSA" else 0)
-                        v2 = cal_am if t2 == "AutoMaintain" else (cal_pgsa if t2 == "HSA" else 0)
-
-                        ah_real = (h_m * (u1 / 100) * v1) + (h_m * (u2 / 100) * v2)
-                        ah_pot = (h_m * v1) + (h_m * v2)
-                        total_ahorro += ah_real;
-                        total_oculto += (ah_pot - ah_real)
-
-                    st.markdown("---")
-                    res1, res2, res3 = st.columns(3)
-                    res1.metric("Ahorro Real", f"USD {total_ahorro:,.2f}")
-                    res2.metric("Costo Oculto", f"USD {total_oculto:,.2f}", delta=f"-{total_oculto:,.2f}",
-                                delta_color="inverse")
-                    res3.metric("Potencial Total", f"USD {(total_ahorro + total_oculto):,.2f}")
-
-            with st.expander("📂 Ver Tabla de Datos"):
-                st.dataframe(df_filt, use_container_width=True)
-
+        df_final = df_ca[df_ca['Tipo de cultivo'].isin(cu_sel)].copy()
+        df_final['Primera cosecha'] = pd.to_datetime(df_final['Primera cosecha'])
+        df_final['Último cosechado'] = pd.to_datetime(df_final['Último cosechado'])
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.sidebar.error(f"Error al procesar archivo: {e}")
+
+st.sidebar.divider()
+st.sidebar.subheader("⛽ Parámetros de Combustible")
+precio_gasoil = st.sidebar.number_input("Precio Gasoil (USD/L)", value=1.0)
+ah_hs_l_ha = st.sidebar.number_input("Ahorro HarvestSmart (L/ha)", value=0.6)
+ah_pgsa_l_ha = st.sidebar.number_input("Ahorro PGSA (L/ha)", value=0.5)
+
+st.sidebar.subheader("🌾 Parámetros de Grano")
+precio_grano_usd = st.sidebar.number_input("Precio Grano (USD/tn)", value=300.0)
+
+c_am, c_psa = st.sidebar.columns(2)
+with c_am:
+    st.caption("**AutoMaintain**")
+    p_sin_am = st.number_input("Sin AM (kg/ha)", value=100.0);
+    p_con_am = st.number_input("Con AM (kg/ha)", value=80.0)
+with c_psa:
+    st.caption("**PSA**")
+    p_sin_psa = st.number_input("Sin PSA (kg/ha)", value=100.0);
+    p_con_psa = st.number_input("Con PSA (kg/ha)", value=90.0)
+
+st.sidebar.subheader("✨ Calidad (BCR)")
+with st.sidebar.expander("Configurar Rotos e Impurezas"):
+    st.write("**AutoMaintain**")
+    r_am_s = st.number_input("% Rotos s/AM", value=2.0);
+    r_am_c = st.number_input("% Rotos c/AM", value=1.0)
+    i_am_s = st.number_input("% Imp. s/AM", value=1.5);
+    i_am_c = st.number_input("% Imp. c/AM", value=0.5)
+    st.divider()
+    st.write("**PSA**")
+    r_psa_s = st.number_input("% Rotos s/PSA", value=2.0);
+    r_psa_c = st.number_input("% Rotos c/PSA", value=1.5)
+    i_psa_s = st.number_input("% Imp. s/PSA", value=1.5);
+    i_psa_c = st.number_input("% Imp. c/PSA", value=1.0)
+
+castigo_am = st.sidebar.number_input("% Castigo sin AM", value=1.5) / 100
+castigo_psa = st.sidebar.number_input("% Castigo sin PSA", value=1.0) / 100
+
+st.sidebar.divider()
+activar_historico = st.sidebar.checkbox("Agregar histórico de uso de tecnología")
+archivo_historico = None
+rango_hist = None
+fechas_ordenadas = []
+
+if activar_historico:
+    archivo_historico = st.sidebar.file_uploader("Subir archivo CSV Histórico", type=["csv"])
+    if archivo_historico:
+        df_h_raw = pd.read_csv(archivo_historico)
+        meses_map = {'ene': 1, 'feb': 2, 'mar': 3, 'abr': 4, 'may': 5, 'jun': 6, 'jul': 7, 'ago': 8, 'sep': 9,
+                     'oct': 10, 'nov': 11, 'dic': 12}
+
+
+        def parse_fecha(texto):
+            try:
+                partes = texto.split()
+                return pd.Timestamp(year=int(partes[1]), month=meses_map[partes[0].lower()], day=1)
+            except:
+                return pd.Timestamp(year=2000, month=1, day=1)
+
+
+        fechas_unicas = df_h_raw['Fecha de terminación (Año y mes)'].unique()
+        fechas_ordenadas = sorted(fechas_unicas, key=parse_fecha)
+        rango_hist = st.sidebar.select_slider("Rango del Histórico", options=fechas_ordenadas,
+                                              value=(fechas_ordenadas[0], fechas_ordenadas[-1]))
+
+# --- CUERPO DEL INFORME ---
+if archivo_subido is not None and not df_final.empty:
+    st.title("🚜 Auditoría de Impacto Tecnológico - Centro de Soluciones Conci")
+    st.subheader(f"Análisis para: {razon_social_input if razon_social_input else 'Flota Seleccionada'}")
+
+    total_has_segmento = df_final['Superficie cosechada'].sum()
+    total_comb = df_final['Combustible total'].sum()
+    c_prom = total_comb / total_has_segmento if total_has_segmento > 0 else 0
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Inicio", df_final['Primera cosecha'].min().strftime('%d/%m/%Y'))
+    c2.metric("Fin", df_final['Último cosechado'].max().strftime('%d/%m/%Y'))
+    c3.metric("Total Hectáreas", f"{total_has_segmento:,.1f} Has")
+    c4.metric("Consumo Total", f"{total_comb:,.0f} Lts")
+    c5.metric("Promedio L/Ha", f"{c_prom:.2f}")
+
+    st.divider()
+    st.subheader("🌾 Rendimientos Promedio por Cultivo")
+    cultivos_en_data = sorted(list(df_final['Tipo de cultivo'].unique()))
+    rtos_cols = st.columns(len(cultivos_en_data))
+    dict_rtos = {cult: df_final[df_final['Tipo de cultivo'] == cult]['Peso húmedo'].mean() for cult in cultivos_en_data}
+    for i, cult in enumerate(cultivos_en_data):
+        rtos_cols[i].metric(f"Rto {cult}", f"{dict_rtos[cult]:.2f} tn/ha")
+
+    st.divider()
+    st.subheader("🛠️ Auditoría de Uso e Impacto Económico")
+    maquinas_sel = st.multiselect("Seleccionar máquinas para el análisis:",
+                                  options=sorted(list(df_final['Nombre de máquina'].unique())),
+                                  default=sorted(list(df_final['Nombre de máquina'].unique())))
+
+    if maquinas_sel:
+        total_has_maquinas = df_final[df_final['Nombre de máquina'].isin(maquinas_sel)]['Superficie cosechada'].sum()
+        h1, h2, h3, h4, h5, h6 = st.columns([1.5, 1, 1.5, 1, 1.5, 1])
+        h1.caption("**Máquina**");
+        h2.caption("**Has**");
+        h3.caption("**Tec. Avance**");
+        h4.caption("**% Uso**");
+        h5.caption("**Tec. Ajuste**");
+        h6.caption("**% Uso**")
+
+        t_ahorro_c = 0.0;
+        t_ahorro_g = 0.0;
+        t_oculto = 0.0
+        tecs_av = set();
+        tecs_aj = set()
+
+        for maq in maquinas_sel:
+            df_m = df_final[df_final['Nombre de máquina'] == maq]
+            h_m = df_m['Superficie cosechada'].sum()
+            cult_p = df_m.groupby('Tipo de cultivo')['Superficie cosechada'].sum().idxmax()
+            rto_ref = dict_rtos[cult_p]
+
+            r1, r2, r3, r4, r5, r6 = st.columns([1.5, 1, 1.5, 1, 1.5, 1])
+            r1.write(f"**{maq}**");
+            r2.write(f"{h_m:,.1f}")
+            t1 = r3.selectbox(f"T1_{maq}", ["HarvestSmart", "PGSA", "Sin Tecnología"], key=f"t1_{maq}",
+                              label_visibility="collapsed")
+            u1 = r4.number_input(f"U1_{maq}", 0, 100, 0, step=5, key=f"u1_{maq}", label_visibility="collapsed")
+            t2 = r5.selectbox(f"T2_{maq}", ["AutoMaintain", "PSA", "Sin Tecnología"], key=f"t2_{maq}",
+                              label_visibility="collapsed")
+            u2 = r6.number_input(f"U2_{maq}", 0, 100, 0, step=5, key=f"u2_{maq}", label_visibility="collapsed")
+
+            if t1 != "Sin Tecnología" and u1 > 0: tecs_av.add(t1)
+            if t2 != "Sin Tecnología" and u2 > 0: tecs_aj.add(t2)
+
+            v_c = (ah_hs_l_ha if t1 == "HarvestSmart" else (ah_pgsa_l_ha if t1 == "PGSA" else 0)) * precio_gasoil
+            v_g = 0
+            if t2 == "AutoMaintain":
+                v_g = (((p_sin_am - p_con_am) / 1000) * precio_grano_usd) + (precio_grano_usd * rto_ref * castigo_am)
+            elif t2 == "PSA":
+                v_g = (((p_sin_psa - p_con_psa) / 1000) * precio_grano_usd) + (precio_grano_usd * rto_ref * castigo_psa)
+
+            t_ahorro_c += (h_m * (u1 / 100) * v_c)
+            t_ahorro_g += (h_m * (u2 / 100) * v_g)
+            t_oculto += (h_m * (1 - u1 / 100) * v_c) + (h_m * (1 - u2 / 100) * v_g)
+
+        st.markdown("---")
+        col_res, col_param, col_pie = st.columns([1, 1, 1])
+        with col_res:
+            st.write("##### 💰 Resultado Económico Actual")
+            ah_total = t_ahorro_c + t_ahorro_g
+            pot_t = ah_total + t_oculto
+            st.markdown(f"<h3 style='color: #28a745; margin-bottom: 0;'>USD {ah_total:,.0f}</h3>",
+                        unsafe_allow_html=True)
+            st.caption(f"Ahorro Real")
+            st.markdown(f"<h3 style='color: #dc3545; margin-bottom: 0;'>USD {t_oculto:,.0f}</h3>",
+                        unsafe_allow_html=True)
+            st.caption("Costo Oculto")
+            st.markdown(f"<h3 style='color: #007bff; margin-bottom: 0;'>USD {pot_t:,.0f}</h3>", unsafe_allow_html=True)
+            st.caption("Potencial Total")
+            efic = (ah_total / pot_t * 100) if pot_t > 0 else 0
+            st.write(f"**Eficiencia: {efic:.1f}%**")
+            st.progress(efic / 100)
+
+        with col_param:
+            st.write("##### 📝 Detalle de Tecnologías y Calidad")
+            if "HarvestSmart" in tecs_av: st.write(f"🚜 **HarvestSmart:** -{ah_hs_l_ha} L/ha")
+            if "PGSA" in tecs_av: st.write(f"🚜 **PGSA:** -{ah_pgsa_l_ha} L/ha")
+            if "AutoMaintain" in tecs_aj:
+                st.write(f"✅ **AutoMaintain:** -{p_sin_am - p_con_am:.0f} kg/ha")
+                st.caption(f"Rotos: {r_am_s}% → {r_am_c}% | Imp: {i_am_s}% → {i_am_c}%")
+            if "PSA" in tecs_aj:
+                st.write(f"✅ **PSA:** -{p_sin_psa - p_con_psa:.0f} kg/ha")
+                st.caption(f"Rotos: {r_psa_s}% → {r_psa_c}% | Imp: {i_psa_s}% → {i_psa_c}%")
+
+        with col_pie:
+            fig_pie = px.pie(values=[t_ahorro_c, t_ahorro_g, t_oculto], names=['Combustible', 'Granos', 'Costo Oculto'],
+                             color_discrete_sequence=['#2ca02c', '#ff7f0e', '#dc3545'], hole=0.4)
+            fig_pie.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=230);
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+    # --- SECCIÓN HISTÓRICO Y COMPARATIVA ---
+    if activar_historico and archivo_historico and rango_hist:
+        st.divider()
+        st.subheader("📈 Evolución de Adopción Tecnológica")
+
+        # Sincronizamos con las fechas ordenadas
+        idx_inicio = fechas_ordenadas.index(rango_hist[0])
+        idx_fin = fechas_ordenadas.index(rango_hist[1])
+
+        # Filtramos el histórico usando la lista maestra de fechas ordenadas
+        fechas_rango = fechas_ordenadas[idx_inicio:idx_fin + 1]
+        df_h = df_h_raw[df_h_raw['Fecha de terminación (Año y mes)'].isin(fechas_rango)].copy()
+
+        # Aseguramos que el DF del gráfico también esté ordenado
+        df_h['temp_date'] = df_h['Fecha de terminación (Año y mes)'].apply(parse_fecha)
+        df_h = df_h.sort_values('temp_date')
+
+        fig_h = go.Figure()
+        fig_h.add_trace(
+            go.Scatter(x=df_h['Fecha de terminación (Año y mes)'], y=df_h['Auto Maintain Activado (%)'] * 100,
+                       mode='lines+markers', name='Auto Maintain', line=dict(color='#367C2B', width=3)))
+        fig_h.add_trace(
+            go.Scatter(x=df_h['Fecha de terminación (Año y mes)'], y=df_h['Harvest Smart Activado (%)'] * 100,
+                       mode='lines+markers', name='Harvest Smart', line=dict(color='#FFDE00', width=3)))
+        fig_h.update_layout(hovermode="x unified", yaxis_title="Uso (%)", template="plotly_white")
+        st.plotly_chart(fig_h, use_container_width=True)
+
+        st.subheader("🔄 Comparativa de Impacto: Inicio vs. Final del Periodo")
+        st.info(f"Análisis basado en las **{total_has_maquinas:,.1f} Has** de las máquinas seleccionadas.")
+
+        h_inicio = df_h.iloc[0];
+        h_fin = df_h.iloc[-1]
+        rto_promedio_flota = sum(dict_rtos.values()) / len(dict_rtos) if dict_rtos else 0
+        pot_c_unit = (
+                         ah_hs_l_ha if "HarvestSmart" in tecs_av else ah_pgsa_l_ha if "PGSA" in tecs_av else ah_hs_l_ha) * precio_gasoil
+
+        pot_g_unit = 0
+        if "AutoMaintain" in tecs_aj or not tecs_aj:
+            pot_g_unit = (((p_sin_am - p_con_am) / 1000) * precio_grano_usd) + (
+                        precio_grano_usd * rto_promedio_flota * castigo_am)
+        elif "PSA" in tecs_aj:
+            pot_g_unit = (((p_sin_psa - p_con_psa) / 1000) * precio_grano_usd) + (
+                        precio_grano_usd * rto_promedio_flota * castigo_psa)
+
+
+        def calcular_impacto(row):
+            ahorro = (total_has_maquinas * row['Harvest Smart Activado (%)'] * pot_c_unit) + (
+                        total_has_maquinas * row['Auto Maintain Activado (%)'] * pot_g_unit)
+            oculto = (total_has_maquinas * (1 - row['Harvest Smart Activado (%)']) * pot_c_unit) + (
+                        total_has_maquinas * (1 - row['Auto Maintain Activado (%)']) * pot_g_unit)
+            return ahorro, oculto
+
+
+        ah_ini, oc_ini = calcular_impacto(h_inicio)
+        ah_fin, oc_fin = calcular_impacto(h_fin)
+
+        comp1, comp2 = st.columns(2)
+        with comp1:
+            st.markdown(f"**Estado al {h_inicio['Fecha de terminación (Año y mes)']}**")
+            st.metric("Ahorro Real", f"USD {ah_ini:,.0f}");
+            st.metric("Costo Oculto", f"USD {oc_ini:,.0f}")
+        with comp2:
+            st.markdown(f"**Estado al {h_fin['Fecha de terminación (Año y mes)']}**")
+            st.metric("Ahorro Real", f"USD {ah_fin:,.0f}", delta=f"↑ USD {ah_fin - ah_ini:,.0f}");
+            st.metric("Costo Oculto", f"USD {oc_fin:,.0f}")
+
+    with st.expander("📂 Ver registros detallados"):
+        st.dataframe(df_final, use_container_width=True)
 else:
-    st.info("👋 Sube el archivo de cosecha para comenzar.")
+    st.info("👋 Por favor, carga el archivo de cosecha para iniciar la auditoría.")
