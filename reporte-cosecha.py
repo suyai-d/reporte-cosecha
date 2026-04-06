@@ -92,6 +92,8 @@ rango_hist = None;
 fechas_ordenadas = []
 
 if activar_historico:
+    st.sidebar.info(
+        "[Link Looker Histórico](https://lookerstudio.google.com/reporting/fea42c5d-6b62-4f18-846e-4a97d90610df)")
     archivo_historico = st.sidebar.file_uploader("Subir archivo CSV Histórico", type=["csv"])
     if archivo_historico:
         df_h_raw = pd.read_csv(archivo_historico)
