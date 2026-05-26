@@ -26,24 +26,34 @@ if archivo_subido is not None:
     try:
         df = pd.read_csv(archivo_subido) if archivo_subido.name.endswith('.csv') else pd.read_excel(archivo_subido)
         df.columns = df.columns.str.strip()
+
+        # --- SECCIÓN DE LIMPIEZA Y CORRECCIÓN DE TIPOS DE DATOS ---
+        cols_num = ['Superficie cosechada', 'Combustible total', 'Peso húmedo']
+        for col in cols_num:
+            if col in df.columns:
+                if df[col].dtype == 'object':
+                    df[col] = df[col].astype(str).str.replace(',', '.')
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        # ------------------------------------------------------------
+
         df_base = df[df['Superficie cosechada'] >= umbral_has].copy()
 
         with st.sidebar.expander("📍 Filtros de Segmentación", expanded=False):
-            c_sel = st.multiselect("Cliente:", options=sorted(df_base['Clientes'].unique()),
-                                   default=sorted(df_base['Clientes'].unique()))
+            c_sel = st.multiselect("Cliente:", options=sorted(df_base['Clientes'].dropna().unique()),
+                                   default=sorted(df_base['Clientes'].dropna().unique()))
             df_c = df_base[df_base['Clientes'].isin(c_sel)]
-            g_sel = st.multiselect("Granja:", options=sorted(df_c['Granjas'].unique()),
-                                   default=sorted(df_c['Granjas'].unique()))
+            g_sel = st.multiselect("Granja:", options=sorted(df_c['Granjas'].dropna().unique()),
+                                   default=sorted(df_c['Granjas'].dropna().unique()))
             df_g = df_c[df_c['Granjas'].isin(g_sel)]
-            ca_sel = st.multiselect("Campo:", options=sorted(df_g['Campos'].unique()),
-                                    default=sorted(df_g['Campos'].unique()))
+            ca_sel = st.multiselect("Campo:", options=sorted(df_g['Campos'].dropna().unique()),
+                                    default=sorted(df_g['Campos'].dropna().unique()))
             df_ca = df_g[df_g['Campos'].isin(ca_sel)]
-            cu_sel = st.multiselect("Cultivo:", options=sorted(df_ca['Tipo de cultivo'].unique()),
-                                    default=sorted(df_ca['Tipo de cultivo'].unique()))
+            cu_sel = st.multiselect("Cultivo:", options=sorted(df_ca['Tipo de cultivo'].dropna().unique()),
+                                    default=sorted(df_ca['Tipo de cultivo'].dropna().unique()))
 
         df_final = df_ca[df_ca['Tipo de cultivo'].isin(cu_sel)].copy()
-        df_final['Primera cosecha'] = pd.to_datetime(df_final['Primera cosecha'])
-        df_final['Último cosechado'] = pd.to_datetime(df_final['Último cosechado'])
+        df_final['Primera cosecha'] = pd.to_datetime(df_final['Primera cosecha'], errors='coerce')
+        df_final['Último cosechado'] = pd.to_datetime(df_final['Último cosechado'], errors='coerce')
     except Exception as e:
         st.sidebar.error(f"Error al procesar archivo: {e}")
 
@@ -59,25 +69,25 @@ precio_grano_usd = st.sidebar.number_input("Precio Grano (USD/tn)", value=300.0)
 c_am, c_psa = st.sidebar.columns(2)
 with c_am:
     st.caption("**AutoMaintain**")
-    p_sin_am = st.number_input("Sin AM (kg/ha)", value=100.0);
+    p_sin_am = st.number_input("Sin AM (kg/ha)", value=100.0)
     p_con_am = st.number_input("Con AM (kg/ha)", value=80.0)
 with c_psa:
     st.caption("**PSA**")
-    p_sin_psa = st.number_input("Sin PSA (kg/ha)", value=100.0);
+    p_sin_psa = st.number_input("Sin PSA (kg/ha)", value=100.0)
     p_con_psa = st.number_input("Con PSA (kg/ha)", value=90.0)
 
 st.sidebar.subheader("✨ Calidad (BCR)")
 with st.sidebar.expander("Configurar Rotos e Impurezas"):
     st.write("**AutoMaintain**")
-    r_am_s = st.number_input("% Rotos s/AM", value=2.0);
+    r_am_s = st.number_input("% Rotos s/AM", value=2.0)
     r_am_c = st.number_input("% Rotos c/AM", value=1.0)
-    i_am_s = st.number_input("% Imp. s/AM", value=1.5);
+    i_am_s = st.number_input("% Imp. s/AM", value=1.5)
     i_am_c = st.number_input("% Imp. c/AM", value=0.5)
     st.divider()
     st.write("**PSA**")
-    r_psa_s = st.number_input("% Rotos s/PSA", value=2.0);
+    r_psa_s = st.number_input("% Rotos s/PSA", value=2.0)
     r_psa_c = st.number_input("% Rotos c/PSA", value=1.5)
-    i_psa_s = st.number_input("% Imp. s/PSA", value=1.5);
+    i_psa_s = st.number_input("% Imp. s/PSA", value=1.5)
     i_psa_c = st.number_input("% Imp. c/PSA", value=1.0)
     st.info(
         "[Link Cámara Arbitral BCR](https://www.cac.bcr.com.ar/es/arbitraje-y-calidad/liquidacion-y-mermas/liquidacion-de-mercaderia)")
@@ -87,13 +97,14 @@ castigo_psa = st.sidebar.number_input("% Castigo sin PSA", value=1.0) / 100
 
 st.sidebar.divider()
 activar_historico = st.sidebar.checkbox("Agregar histórico de uso de tecnología")
-archivo_historico = None;
-rango_hist = None;
+archivo_historico = None
+rango_hist = None
 fechas_ordenadas = []
 
 if activar_historico:
     st.sidebar.info(
-        "[Link Looker Histórico](https://lookerstudio.google.com/reporting/fea42c5d-6b62-4f18-846e-4a97d90610df)")
+        "[Link Looker Histórico](https://lookerstudio.google.com/reporting/fea42c5d-6b62-4f18-846e-4a97d90610df)"
+    )
     archivo_historico = st.sidebar.file_uploader("Subir archivo CSV Histórico", type=["csv"])
     if archivo_historico:
         df_h_raw = pd.read_csv(archivo_historico)
@@ -119,24 +130,34 @@ if archivo_subido is not None and not df_final.empty:
     st.title("🚜 Auditoría de Tecnología en Cosechadoras")
     st.subheader(f"Análisis para: {razon_social_input if razon_social_input else 'Flota Seleccionada'}")
 
-    total_has_segmento = df_final['Superficie cosechada'].sum()
-    total_comb = df_final['Combustible total'].sum()
+    # Forzamos conversión numérica limpia antes de realizar operaciones matemáticas
+    total_has_segmento = pd.to_numeric(df_final['Superficie cosechada'], errors='coerce').sum()
+    total_comb = pd.to_numeric(df_final['Combustible total'], errors='coerce').sum()
+
     c_prom = total_comb / total_has_segmento if total_has_segmento > 0 else 0
 
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Inicio", df_final['Primera cosecha'].min().strftime('%d/%m/%Y'))
-    c2.metric("Fin", df_final['Último cosechado'].max().strftime('%d/%m/%Y'))
+    c1.metric("Inicio", df_final['Primera cosecha'].min().strftime('%d/%m/%Y') if pd.notna(
+        df_final['Primera cosecha'].min()) else "N/A")
+    c2.metric("Fin", df_final['Último cosechado'].max().strftime('%d/%m/%Y') if pd.notna(
+        df_final['Último cosechado'].max()) else "N/A")
     c3.metric("Total Hectáreas", f"{total_has_segmento:,.1f} Has")
     c4.metric("Consumo Total", f"{total_comb:,.0f} Lts")
     c5.metric("Promedio L/Ha", f"{c_prom:.2f}")
 
     st.divider()
     st.subheader("🌾 Rendimientos Promedio por Cultivo")
-    cultivos_en_data = sorted(list(df_final['Tipo de cultivo'].unique()))
-    rtos_cols = st.columns(len(cultivos_en_data))
-    dict_rtos = {cult: df_final[df_final['Tipo de cultivo'] == cult]['Peso húmedo'].mean() for cult in cultivos_en_data}
+    cultivos_en_data = sorted(list(df_final['Tipo de cultivo'].dropna().unique()))
+    rtos_cols = st.columns(len(cultivos_en_data)) if cultivos_en_data else [st.container()]
+
+    # Se añade pd.to_numeric aquí también para asegurar la compatibilidad matemática de la columna Peso húmedo
+    dict_rtos = {
+        cult: pd.to_numeric(df_final[df_final['Tipo de cultivo'] == cult]['Peso húmedo'], errors='coerce').mean() for
+        cult in cultivos_en_data}
+
     for i, cult in enumerate(cultivos_en_data):
-        rtos_cols[i].metric(f"Rto {cult}", f"{dict_rtos[cult]:.2f} tn/ha")
+        val_rto = dict_rtos[cult] if pd.notna(dict_rtos[cult]) else 0.0
+        rtos_cols[i].metric(f"Rto {cult}", f"{val_rto:.2f} tn/ha")
 
     st.divider()
     st.subheader("🛠️ Auditoría de Uso e Impacto Económico")
@@ -146,30 +167,35 @@ if archivo_subido is not None and not df_final.empty:
 
     if maquinas_sel:
         df_maquinas = df_final[df_final['Nombre de máquina'].isin(maquinas_sel)]
-        total_has_maquinas = df_maquinas['Superficie cosechada'].sum()
+        total_has_maquinas = pd.to_numeric(df_maquinas['Superficie cosechada'], errors='coerce').sum()
 
-        t_ahorro_c = 0.0;
-        t_ahorro_g = 0.0;
+        t_ahorro_c = 0.0
+        t_ahorro_g = 0.0
         t_oculto = 0.0
-        tecs_av = set();
+        tecs_av = set()
         tecs_aj = set()
 
         h1, h2, h3, h4, h5, h6 = st.columns([1.5, 1, 1.5, 1, 1.5, 1])
-        h1.caption("**Máquina**");
-        h2.caption("**Has**");
-        h3.caption("**Tec. Avance**");
-        h4.caption("**% Uso**");
-        h5.caption("**Tec. Ajuste**");
+        h1.caption("**Máquina**")
+        h2.caption("**Has**")
+        h3.caption("**Tec. Avance**")
+        h4.caption("**% Uso**")
+        h5.caption("**Tec. Ajuste**")
         h6.caption("**% Uso**")
 
         for maq in maquinas_sel:
             df_m = df_maquinas[df_maquinas['Nombre de máquina'] == maq]
-            h_m = df_m['Superficie cosechada'].sum()
-            cult_p = df_m.groupby('Tipo de cultivo')['Superficie cosechada'].sum().idxmax()
-            rto_ref = dict_rtos[cult_p]
+            h_m = pd.to_numeric(df_m['Superficie cosechada'], errors='coerce').sum()
+
+            # Evitamos errores si no hay datos de superficie válidos para agrupar
+            try:
+                cult_p = df_m.groupby('Tipo de cultivo')['Superficie cosechada'].sum().idxmax()
+                rto_ref = dict_rtos[cult_p] if pd.notna(dict_rtos[cult_p]) else 0.0
+            except:
+                rto_ref = 0.0
 
             r1, r2, r3, r4, r5, r6 = st.columns([1.5, 1, 1.5, 1, 1.5, 1])
-            r1.write(f"**{maq}**");
+            r1.write(f"**{maq}**")
             r2.write(f"{h_m:,.1f}")
             t1 = r3.selectbox(f"T1_{maq}", ["HarvestSmart", "PGSA", "Sin Tecnología"], key=f"t1_{maq}",
                               label_visibility="collapsed")
@@ -224,7 +250,7 @@ if archivo_subido is not None and not df_final.empty:
         with col_pie:
             fig_pie = px.pie(values=[t_ahorro_c, t_ahorro_g, t_oculto], names=['Combustible', 'Granos', 'Costo Oculto'],
                              color_discrete_sequence=['#2ca02c', '#ff7f0e', '#dc3545'], hole=0.4)
-            fig_pie.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=230);
+            fig_pie.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=230)
             st.plotly_chart(fig_pie, use_container_width=True)
 
         # --- SECCIÓN HISTÓRICO Y COMPARATIVA ---
@@ -240,20 +266,16 @@ if archivo_subido is not None and not df_final.empty:
 
             # --- GRÁFICO CON 4 SERIES ---
             fig_h = go.Figure()
-            # Harvest Smart (Serie S700 Avance)
             fig_h.add_trace(
                 go.Scatter(x=df_h['Fecha de terminación (Año y mes)'], y=df_h['Harvest Smart Activado (%)'] * 100,
                            mode='lines+markers', name='Harvest Smart', line=dict(color='#FFDE00', width=3)))
-            # Auto Maintain (Serie S700 Ajuste)
             fig_h.add_trace(
                 go.Scatter(x=df_h['Fecha de terminación (Año y mes)'], y=df_h['Auto Maintain Activado (%)'] * 100,
                            mode='lines+markers', name='Auto Maintain', line=dict(color='#367C2B', width=3)))
-            # PGSA (Serie S7 Avance)
             fig_h.add_trace(go.Scatter(x=df_h['Fecha de terminación (Año y mes)'],
                                        y=df_h['Automatización de la velocidad de avance Activo (%)'] * 100,
                                        mode='lines+markers', name='PGSA (S7)',
                                        line=dict(color='#007bff', width=3, dash='dash')))
-            # PSA (Serie S7 Ajuste)
             fig_h.add_trace(go.Scatter(x=df_h['Fecha de terminación (Año y mes)'],
                                        y=df_h['Automatización de ajustes de cosecha Activo (%)'] * 100,
                                        mode='lines+markers', name='PSA (S7)',
@@ -269,14 +291,14 @@ if archivo_subido is not None and not df_final.empty:
             col_ini, col_fin = st.columns(2)
             with col_ini:
                 st.markdown(f"📅 **Inicio: {rango_hist[0]}**")
-                has_s7_ini = st.slider("Has para S7 (PGSA/PSA)", 0.0, float(total_has_maquinas),
+                has_s7_ini = st.slider("Has para S7 / Has para S700", 0.0, float(total_has_maquinas),
                                        float(total_has_maquinas / 2), key="s7_ini")
                 has_s700_ini = total_has_maquinas - has_s7_ini
                 st.caption(f"S7: {has_s7_ini:,.1f} ha | S700: {has_s700_ini:,.1f} ha")
 
             with col_fin:
                 st.markdown(f"📅 **Fin: {rango_hist[1]}**")
-                has_s7_fin = st.slider("Has para S7 (PGSA/PSA)", 0.0, float(total_has_maquinas),
+                has_s7_fin = st.slider("Has para S7 / Has para S700", 0.0, float(total_has_maquinas),
                                        float(total_has_maquinas / 2), key="s7_fin")
                 has_s700_fin = total_has_maquinas - has_s7_fin
                 st.caption(f"S7: {has_s7_fin:,.1f} ha | S700: {has_s700_fin:,.1f} ha")
@@ -289,23 +311,21 @@ if archivo_subido is not None and not df_final.empty:
 
 
             def calcular_impacto_ponderado(row, h_s7, h_s700):
-                # Usamos las columnas específicas de cada tecnología del CSV
                 u_hs = row['Harvest Smart Activado (%)']
                 u_am = row['Auto Maintain Activado (%)']
                 u_pgsa = row['Automatización de la velocidad de avance Activo (%)']
                 u_psa = row['Automatización de ajustes de cosecha Activo (%)']
 
-                # Para evitar errores si las columnas de S7 vienen vacías (NaN) en datos viejos
                 u_pgsa = 0 if pd.isna(u_pgsa) else u_pgsa
                 u_psa = 0 if pd.isna(u_psa) else u_psa
 
                 ahorro = (h_s7 * (u_pgsa * v_c_s7 + u_psa * v_g_s7)) + (h_s700 * (u_hs * v_c_s700 + u_am * v_g_s700))
                 oculto = (h_s7 * ((1 - u_pgsa) * v_c_s7 + (1 - u_psa) * v_g_s7)) + (
-                            h_s700 * ((1 - u_hs) * v_c_s700 + (1 - u_am) * v_g_s700))
+                        h_s700 * ((1 - u_hs) * v_c_s700 + (1 - u_am) * v_g_s700))
                 return ahorro, oculto
 
 
-            h_inicio = df_h.iloc[0];
+            h_inicio = df_h.iloc[0]
             h_fin = df_h.iloc[-1]
             ah_ini, oc_ini = calcular_impacto_ponderado(h_inicio, has_s7_ini, has_s700_ini)
             ah_fin, oc_fin = calcular_impacto_ponderado(h_fin, has_s7_fin, has_s700_fin)
