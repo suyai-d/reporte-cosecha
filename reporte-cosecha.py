@@ -2,16 +2,13 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import requests
+import base64
+from datetime import datetime
+from io import StringIO
 
 # --- 1. CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Reporte Impacto Tecnológico", page_icon="🚜", layout="wide")
-
-# --- 2. LOGOS SUPERIORES ---
-col_logo_izq, col_espacio, col_logo_der = st.columns([1, 4, 1])
-with col_logo_izq:
-    st.image("CSC.png", width=150)
-with col_logo_der:
-    st.image("JD.png", width=170)
 
 # --- CONFIGURACIÓN DE GITHUB API ---
 GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
@@ -19,12 +16,10 @@ REPO_OWNER = "suyai-d"
 REPO_NAME = "reportes-seguridad-db"
 BRANCH = "main"
 
-URL_USUARIOS = f"https://raw.githubusercontent.com/suyai-d/reportes-seguridad-db/main/usuarios_permitidos.csv"
-
 # --- FUNCIONES DE CONTROL DE ACCESO Y LOGS ---
 def verificar_usuario(legajo_ingresado):
     """Intenta leer desde GitHub de forma estricta para alertar errores."""
-    url_api_usuarios = f"https://api.github.com/repos/suyai-d/reportes-seguridad-db/contents/usuarios_permitidos.csv"
+    url_api_usuarios = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/usuarios_permitidos.csv"
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
         "Accept": "application/vnd.github.v3+json"
@@ -35,9 +30,10 @@ def verificar_usuario(legajo_ingresado):
         response = requests.get(url_api_usuarios, headers=headers, timeout=5)
         if response.status_code == 200:
             file_data = response.json()
-            import base64
             content = base64.b64decode(file_data['content']).decode('utf-8')
             df_usuarios = pd.read_csv(StringIO(content))
+            
+            # Limpieza exhaustiva de la columna de usuarios
             df_usuarios['usuarios'] = df_usuarios['usuarios'].astype(str).str.replace(r'\r|\n', '', regex=True).str.strip().str.upper()
             return legajo_limpio in df_usuarios['usuarios'].values
         else:
@@ -50,7 +46,7 @@ def verificar_usuario(legajo_ingresado):
 
 def registrar_evento_github(usuario, accion, cliente="N/A"):
     """Intenta escribir en GitHub y muestra una alerta en la web si falla."""
-    url_registro = f"https://api.github.com/repos/suyai-d/reportes-seguridad-db/contents/registro_actividad.csv"
+    url_registro = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/registro_actividad.csv"
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
         "Accept": "application/vnd.github.v3+json"
@@ -60,7 +56,7 @@ def registrar_evento_github(usuario, accion, cliente="N/A"):
         "fecha_hora": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "usuario": usuario.upper(),
         "accion": accion,
-        "cliente": cliente
+        "cliente": cliente if cliente else "No especificado"
     }
 
     try:
@@ -70,47 +66,60 @@ def registrar_evento_github(usuario, accion, cliente="N/A"):
             sha = file_data['sha']
             content = base64.b64decode(file_data['content']).decode('utf-8')
             df_log = pd.read_csv(StringIO(content))
+            
+            # Unimos el nuevo evento
             df_log = pd.concat([df_log, pd.DataFrame([nueva_fila])], ignore_index=True)
 
             csv_actualizado = df_log.to_csv(index=False)
             content_encoded = base64.b64encode(csv_actualizado.encode('utf-8')).decode('utf-8')
 
-            payload = {"message": f"Log: {usuario} - {accion}", "content": content_encoded, "branch": BRANCH, "sha": sha}
+            payload = {
+                "message": f"Log: {usuario} - {accion}", 
+                "content": content_encoded, 
+                "branch": BRANCH, 
+                "sha": sha
+            }
             
-            res_put = requests.put(url_registro, json=payload, headers=headers, timeout=5)
-            
+            requests.put(url_registro, json=payload, headers=headers, timeout=5)
         else:
             st.error(f"❌ No se pudo encontrar el archivo de registros en GitHub. Código: {res.status_code}")
     except Exception as e:
         st.error(f"💥 Error crítico al intentar escribir log: {str(e)}")
 
+
 # --- FLUJO DE AUTENTICACIÓN ---
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
     st.session_state.usuario = ""
+if "log_reporte_enviado" not in st.session_state:
+    st.session_state.log_reporte_enviado = False
 
 if not st.session_state.autenticado:
     st.markdown("""<style>.main .block-container { max-width: 450px; padding-top: 5rem; }</style>""", unsafe_allow_html=True)
     st.markdown("<h2 style='text-align: center; color: #367c2b;'>Acceso al Reporte de Cosecha</h2>", unsafe_allow_html=True)
     legajo = st.text_input("Ingresá tu legajo:", placeholder="X000000")
 
-    # TODO ESTO AHORA QUEDÓ ADENTRO DEL CONTROL VISUAL CORRECTAMENTE
     if st.button("Ingresar al Tablero", use_container_width=True):
         if verificar_usuario(legajo):
             st.session_state.autenticado = True
             st.session_state.usuario = legajo.upper()
-            registrar_evento_github(legajo, "Ingreso al Checklist")
-            st.empty() 
+            registrar_evento_github(legajo, "Ingreso al Tablero")
             st.rerun()
         else:
             st.error("❌ Usuario no autorizado. Verificá tu legajo.")
-    st.stop()  # Detiene la carga acá si no se logueó con éxito
+    st.stop()  # Detiene la carga de la página aquí si no está autenticado
 
-# --- INTERFAZ DEL CHECKLIST AUTORIZADO (SOLO SE VE SI PASA EL LOGEO) ---
+# --- INTERFAZ DEL TABLERO AUTORIZADO ---
 st.markdown(
     """<style>.metric-container { background-color: #ffffff; padding: 15px; border-radius:10px; border:1px solid #e6e9ef; text-align:center; margin-bottom:20px; }</style>""",
     unsafe_allow_html=True)
-render_header()
+
+# --- LOGOS SUPERIORES (Se renderizan arriba una vez logueado) ---
+col_logo_izq, col_espacio, col_logo_der = st.columns([1, 4, 1])
+with col_logo_izq:
+    st.image("CSC.png", width=150)
+with col_logo_der:
+    st.image("JD.png", width=170)
 
 # --- SIDEBAR: CONFIGURACIÓN ---
 st.sidebar.header("⚙️ Configuración del Reporte")
@@ -153,6 +162,12 @@ if archivo_subido is not None:
         df_final = df_ca[df_ca['Tipo de cultivo'].isin(cu_sel)].copy()
         df_final['Primera cosecha'] = pd.to_datetime(df_final['Primera cosecha'], errors='coerce')
         df_final['Último cosechado'] = pd.to_datetime(df_final['Último cosechado'], errors='coerce')
+        
+        # Logueamos la generación del informe una única vez por sesión cuando cargan la info
+        if not st.session_state.log_reporte_enviado:
+            registrar_evento_github(st.session_state.usuario, "Exportó Reporte a PDF", razon_social_input)
+            st.session_state.log_reporte_enviado = True
+
     except Exception as e:
         st.sidebar.error(f"Error al procesar archivo: {e}")
 
@@ -210,14 +225,12 @@ if activar_historico:
         meses_map = {'ene': 1, 'feb': 2, 'mar': 3, 'abr': 4, 'may': 5, 'jun': 6, 'jul': 7, 'ago': 8, 'sept': 9,
                      'oct': 10, 'nov': 11, 'dic': 12}
 
-
         def parse_fecha(texto):
             try:
                 partes = texto.split()
                 return pd.Timestamp(year=int(partes[1]), month=meses_map[partes[0].lower()], day=1)
             except:
                 return pd.Timestamp(year=2000, month=1, day=1)
-
 
         fechas_unicas = df_h_raw['Fecha de terminación (Año y mes)'].unique()
         fechas_ordenadas = sorted(fechas_unicas, key=parse_fecha)
@@ -229,17 +242,14 @@ if archivo_subido is not None and not df_final.empty:
     st.title("🚜 Auditoría de Tecnología en Cosechadoras")
     st.subheader(f"Análisis para: {razon_social_input if razon_social_input else 'Flota Seleccionada'}")
 
-    # Forzamos conversión numérica limpia antes de realizar operaciones matemáticas
     total_has_segmento = pd.to_numeric(df_final['Superficie cosechada'], errors='coerce').sum()
     total_comb = pd.to_numeric(df_final['Combustible total'], errors='coerce').sum()
 
     c_prom = total_comb / total_has_segmento if total_has_segmento > 0 else 0
 
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Inicio", df_final['Primera cosecha'].min().strftime('%d/%m/%Y') if pd.notna(
-        df_final['Primera cosecha'].min()) else "N/A")
-    c2.metric("Fin", df_final['Último cosechado'].max().strftime('%d/%m/%Y') if pd.notna(
-        df_final['Último cosechado'].max()) else "N/A")
+    c1.metric("Inicio", df_final['Primera cosecha'].min().strftime('%d/%m/%Y') if pd.notna(df_final['Primera cosecha'].min()) else "N/A")
+    c2.metric("Fin", df_final['Último cosechado'].max().strftime('%d/%m/%Y') if pd.notna(df_final['Último cosechado'].max()) else "N/A")
     c3.metric("Total Hectáreas", f"{total_has_segmento:,.1f} Has")
     c4.metric("Consumo Total", f"{total_comb:,.0f} Lts")
     c5.metric("Promedio L/Ha", f"{c_prom:.2f}")
@@ -248,12 +258,9 @@ if archivo_subido is not None and not df_final.empty:
     st.subheader("🌾 Rendimientos Promedio por Cultivo")
     cultivos_en_data = sorted(list(df_final['Tipo de cultivo'].dropna().unique()))
     rtos_cols = st.columns(len(cultivos_en_data)) if cultivos_en_data else [st.container()]
-
-    # Se añade pd.to_numeric aquí también para asegurar la compatibilidad matemática de la columna Peso húmedo
-    dict_rtos = {
-        cult: pd.to_numeric(df_final[df_final['Tipo de cultivo'] == cult]['Peso húmedo'], errors='coerce').mean() for
-        cult in cultivos_en_data}
-
+    
+    dict_rtos = {cult: pd.to_numeric(df_final[df_final['Tipo de cultivo'] == cult]['Peso húmedo'], errors='coerce').mean() for cult in cultivos_en_data}
+    
     for i, cult in enumerate(cultivos_en_data):
         val_rto = dict_rtos[cult] if pd.notna(dict_rtos[cult]) else 0.0
         rtos_cols[i].metric(f"Rto {cult}", f"{val_rto:.2f} tn/ha")
@@ -285,8 +292,7 @@ if archivo_subido is not None and not df_final.empty:
         for maq in maquinas_sel:
             df_m = df_maquinas[df_maquinas['Nombre de máquina'] == maq]
             h_m = pd.to_numeric(df_m['Superficie cosechada'], errors='coerce').sum()
-
-            # Evitamos errores si no hay datos de superficie válidos para agrupar
+            
             try:
                 cult_p = df_m.groupby('Tipo de cultivo')['Superficie cosechada'].sum().idxmax()
                 rto_ref = dict_rtos[cult_p] if pd.notna(dict_rtos[cult_p]) else 0.0
@@ -408,7 +414,6 @@ if archivo_subido is not None and not df_final.empty:
             v_c_s700 = ah_hs_l_ha * precio_gasoil
             v_g_s700 = (((p_sin_am - p_con_am) / 1000) * precio_grano_usd) + (precio_grano_usd * rto_prom * castigo_am)
 
-
             def calcular_impacto_ponderado(row, h_s7, h_s700):
                 u_hs = row['Harvest Smart Activado (%)']
                 u_am = row['Auto Maintain Activado (%)']
@@ -420,9 +425,8 @@ if archivo_subido is not None and not df_final.empty:
 
                 ahorro = (h_s7 * (u_pgsa * v_c_s7 + u_psa * v_g_s7)) + (h_s700 * (u_hs * v_c_s700 + u_am * v_g_s700))
                 oculto = (h_s7 * ((1 - u_pgsa) * v_c_s7 + (1 - u_psa) * v_g_s7)) + (
-                        h_s700 * ((1 - u_hs) * v_c_s700 + (1 - u_am) * v_g_s700))
+                            h_s700 * ((1 - u_hs) * v_c_s700 + (1 - u_am) * v_g_s700))
                 return ahorro, oculto
-
 
             h_inicio = df_h.iloc[0]
             h_fin = df_h.iloc[-1]
