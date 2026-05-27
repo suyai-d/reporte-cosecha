@@ -84,6 +84,34 @@ def registrar_evento_github(usuario, accion, cliente="N/A"):
     except Exception as e:
         st.error(f"💥 Error crítico al intentar escribir log: {str(e)}")
 
+# --- FLUJO DE AUTENTICACIÓN ---
+if "autenticado" not in st.session_state:
+    st.session_state.autenticado = False
+    st.session_state.usuario = ""
+
+if not st.session_state.autenticado:
+    st.markdown("""<style>.main .block-container { max-width: 450px; padding-top: 5rem; }</style>""", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center; color: #367c2b;'>Acceso al Reporte de Cosecha</h2>", unsafe_allow_html=True)
+    legajo = st.text_input("Ingresá tu legajo:", placeholder="X000000")
+
+    # TODO ESTO AHORA QUEDÓ ADENTRO DEL CONTROL VISUAL CORRECTAMENTE
+    if st.button("Ingresar al Tablero", use_container_width=True):
+        if verificar_usuario(legajo):
+            st.session_state.autenticado = True
+            st.session_state.usuario = legajo.upper()
+            registrar_evento_github(legajo, "Ingreso al Checklist")
+            st.empty() 
+            st.rerun()
+        else:
+            st.error("❌ Usuario no autorizado. Verificá tu legajo.")
+    st.stop()  # Detiene la carga acá si no se logueó con éxito
+
+# --- INTERFAZ DEL CHECKLIST AUTORIZADO (SOLO SE VE SI PASA EL LOGEO) ---
+st.markdown(
+    """<style>.metric-container { background-color: #ffffff; padding: 15px; border-radius:10px; border:1px solid #e6e9ef; text-align:center; margin-bottom:20px; }</style>""",
+    unsafe_allow_html=True)
+render_header()
+
 # --- SIDEBAR: CONFIGURACIÓN ---
 st.sidebar.header("⚙️ Configuración del Reporte")
 archivo_subido = st.sidebar.file_uploader("Subir Excel de Cosecha", type=["xlsx", "csv"])
