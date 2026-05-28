@@ -127,8 +127,8 @@ with col_logo_der:
 
 # --- SIDEBAR: CONFIGURACIÓN ---
 st.sidebar.header("⚙️ Configuración del Reporte")
-archivo_subido = st.sidebar.file_uploader("Subir Excel de Cosecha", type=["xlsx", "csv"])
 razon_social_input = st.sidebar.text_input("Razón Social del Cliente", placeholder="Ej: Agropecuaria El Ombú S.A.")
+archivo_subido = st.sidebar.file_uploader("Subir Excel de Cosecha", type=["xlsx", "csv"])
 
 umbral_has = st.sidebar.number_input("Filtrar labores menores a (Has):", min_value=0.0, value=2.0, step=0.5)
 
