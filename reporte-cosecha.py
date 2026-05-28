@@ -1,14 +1,25 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
+import plotly.express as px
 import requests
 import base64
-from datetime import datetime
 from io import StringIO
+from datetime import datetime
 
-# --- 1. CONFIGURACIÓN DE LA PÁGINA ---
-st.set_page_config(page_title="Reporte Impacto Tecnológico", page_icon="🚜", layout="wide")
+# Configuración de la página
+st.set_page_config(
+    page_title="Cierre de Campaña - Analizador",
+    page_icon="🚜",
+    layout="wide"
+)
+
+# --- LOGOS SUPERIORES ---
+col_logo_izq, col_espacio, col_logo_der = st.columns([1, 4, 1])
+with col_logo_izq:
+    st.image("CSC.png", width=170)
+with col_logo_der:
+    st.image("JD.png", width=200)
 
 # --- CONFIGURACIÓN DE GITHUB API ---
 GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
@@ -35,8 +46,7 @@ def verificar_usuario(legajo_ingresado):
             df_usuarios = pd.read_csv(StringIO(content))
 
             # Limpieza exhaustiva de la columna de usuarios
-            df_usuarios['usuarios'] = df_usuarios['usuarios'].astype(str).str.replace(r'\r|\n', '',
-                                                                                      regex=True).str.strip().str.upper()
+            df_usuarios['usuarios'] = df_usuarios['usuarios'].astype(str).str.replace(r'\r|\n', '', regex=True).str.strip().str.upper()
             return legajo_limpio in df_usuarios['usuarios'].values
         else:
             st.error(f"⚠️ Error de lectura en GitHub (Status: {response.status_code}). Revisar Token.")
@@ -93,21 +103,17 @@ def registrar_evento_github(usuario, accion, cliente="N/A"):
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
     st.session_state.usuario = ""
-if "log_reporte_enviado" not in st.session_state:
-    st.session_state.log_reporte_enviado = False
 
 if not st.session_state.autenticado:
-    st.markdown("""<style>.main .block-container { max-width: 450px; padding-top: 5rem; }</style>""",
-                unsafe_allow_html=True)
-    st.markdown("<h2 style='text-align: center; color: #367c2b;'>Acceso al Reporte de Cosecha</h2>",
-                unsafe_allow_html=True)
+    st.markdown("""<style>.main .block-container { max-width: 450px; padding-top: 5rem; }</style>""", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center; color: #367c2b;'>Acceso al Reporte de Cierre de Campaña</h2>", unsafe_allow_html=True)
     legajo = st.text_input("Ingresá tu legajo:", placeholder="X000000")
 
     if st.button("Ingresar al Tablero", use_container_width=True):
         if verificar_usuario(legajo):
             st.session_state.autenticado = True
             st.session_state.usuario = legajo.upper()
-            registrar_evento_github(legajo, "Ingreso al Reporte Cosecha")
+            registrar_evento_github(legajo, "Ingreso al Tablero")
             st.rerun()
         else:
             st.error("❌ Usuario no autorizado. Verificá tu legajo.")
@@ -118,343 +124,508 @@ st.markdown(
     """<style>.metric-container { background-color: #ffffff; padding: 15px; border-radius:10px; border:1px solid #e6e9ef; text-align:center; margin-bottom:20px; }</style>""",
     unsafe_allow_html=True)
 
-# --- LOGOS SUPERIORES (Se renderizan arriba una vez logueado) ---
-col_logo_izq, col_espacio, col_logo_der = st.columns([1, 4, 1])
-with col_logo_izq:
-    st.image("CSC.png", width=150)
-with col_logo_der:
-    st.image("JD.png", width=170)
+# --- SIDEBAR ---
+st.sidebar.header("Configuración del Informe")
 
-# --- SIDEBAR: CONFIGURACIÓN ---
-st.sidebar.header("⚙️ Configuración del Reporte")
-archivo_subido = st.sidebar.file_uploader("Subir Excel de Cosecha", type=["xlsx", "csv"])
-razon_social_input = st.sidebar.text_input("Razón Social del Cliente", placeholder="Ej: Agropecuaria El Ombú S.A.")
+# Razón Social
+razon_social = st.sidebar.text_input("Razón Social del Cliente", placeholder="Ej: H&H Outfitters SA")
+st.sidebar.markdown("---")
 
-umbral_has = st.sidebar.number_input("Filtrar labores menores a (Has):", min_value=0.0, value=2.0, step=0.5)
+# --- SECCIÓN 1: PERFORMANCE ---
+st.sidebar.subheader("📊 1. Performance de Maquinaria")
+activar_performance = st.sidebar.checkbox("Incluir análisis de Performance", value=True)
 
-df_final = pd.DataFrame()
+df = None
+maquinas_seleccionadas = []
 
-if archivo_subido is not None:
-    try:
-        df = pd.read_csv(archivo_subido) if archivo_subido.name.endswith('.csv') else pd.read_excel(archivo_subido)
-        df.columns = df.columns.str.strip()
-
-        # --- SECCIÓN DE LIMPIEZA Y CORRECCIÓN DE TIPOS DE DATOS ---
-        cols_num = ['Superficie cosechada', 'Combustible total', 'Peso húmedo']
-        for col in cols_num:
-            if col in df.columns:
-                if df[col].dtype == 'object':
-                    df[col] = df[col].astype(str).str.replace(',', '.')
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-        # ------------------------------------------------------------
-
-        df_base = df[df['Superficie cosechada'] >= umbral_has].copy()
-
-        with st.sidebar.expander("📍 Filtros de Segmentación", expanded=False):
-            c_sel = st.multiselect("Cliente:", options=sorted(df_base['Clientes'].dropna().unique()),
-                                   default=sorted(df_base['Clientes'].dropna().unique()))
-            df_c = df_base[df_base['Clientes'].isin(c_sel)]
-            g_sel = st.multiselect("Granja:", options=sorted(df_c['Granjas'].dropna().unique()),
-                                   default=sorted(df_c['Granjas'].dropna().unique()))
-            df_g = df_c[df_c['Granjas'].isin(g_sel)]
-            ca_sel = st.multiselect("Campo:", options=sorted(df_g['Campos'].dropna().unique()),
-                                    default=sorted(df_g['Campos'].dropna().unique()))
-            df_ca = df_g[df_g['Campos'].isin(ca_sel)]
-            cu_sel = st.multiselect("Cultivo:", options=sorted(df_ca['Tipo de cultivo'].dropna().unique()),
-                                    default=sorted(df_ca['Tipo de cultivo'].dropna().unique()))
-
-        df_final = df_ca[df_ca['Tipo de cultivo'].isin(cu_sel)].copy()
-        df_final['Primera cosecha'] = pd.to_datetime(df_final['Primera cosecha'], errors='coerce')
-        df_final['Último cosechado'] = pd.to_datetime(df_final['Último cosechado'], errors='coerce')
-
-        # Logueamos la generación del informe una única vez por sesión cuando cargan la info
-        if not st.session_state.log_reporte_enviado:
-            registrar_evento_github(st.session_state.usuario, "Exportó Reporte Cosecha a PDF", razon_social_input)
-            st.session_state.log_reporte_enviado = True
-
-    except Exception as e:
-        st.sidebar.error(f"Error al procesar archivo: {e}")
-
-st.sidebar.divider()
-st.sidebar.subheader("⛽ Parámetros de Combustible")
-precio_gasoil = st.sidebar.number_input("Precio Gasoil (USD/L)", value=1.0)
-ah_hs_l_ha = st.sidebar.number_input("Ahorro HarvestSmart (L/ha)", value=0.6)
-ah_pgsa_l_ha = st.sidebar.number_input("Ahorro PGSA (L/ha)", value=0.5)
-
-st.sidebar.subheader("🌾 Parámetros de Grano")
-precio_grano_usd = st.sidebar.number_input("Precio Grano (USD/tn)", value=300.0)
-
-c_am, c_psa = st.sidebar.columns(2)
-with c_am:
-    st.caption("**AutoMaintain**")
-    p_sin_am = st.number_input("Sin AM (kg/ha)", value=100.0)
-    p_con_am = st.number_input("Con AM (kg/ha)", value=80.0)
-with c_psa:
-    st.caption("**PSA**")
-    p_sin_psa = st.number_input("Sin PSA (kg/ha)", value=100.0)
-    p_con_psa = st.number_input("Con PSA (kg/ha)", value=90.0)
-
-st.sidebar.subheader("✨ Calidad (BCR)")
-with st.sidebar.expander("Configurar Rotos e Impurezas"):
-    st.write("**AutoMaintain**")
-    r_am_s = st.number_input("% Rotos s/AM", value=2.0)
-    r_am_c = st.number_input("% Rotos c/AM", value=1.0)
-    i_am_s = st.number_input("% Imp. s/AM", value=1.5)
-    i_am_c = st.number_input("% Imp. c/AM", value=0.5)
-    st.divider()
-    st.write("**PSA**")
-    r_psa_s = st.number_input("% Rotos s/PSA", value=2.0)
-    r_psa_c = st.number_input("% Rotos c/PSA", value=1.5)
-    i_psa_s = st.number_input("% Imp. s/PSA", value=1.5)
-    i_psa_c = st.number_input("% Imp. c/PSA", value=1.0)
-    st.info(
-        "[Link Cámara Arbitral BCR](https://www.cac.bcr.com.ar/es/arbitraje-y-calidad/liquidacion-y-mermas/liquidacion-de-mercaderia)")
-
-castigo_am = st.sidebar.number_input("% Castigo sin AM", value=1.5) / 100
-castigo_psa = st.sidebar.number_input("% Castigo sin PSA", value=1.0) / 100
-
-st.sidebar.divider()
-activar_historico = st.sidebar.checkbox("Agregar histórico de uso de tecnología")
-archivo_historico = None
-rango_hist = None
-fechas_ordenadas = []
-
-if activar_historico:
-    st.sidebar.info(
-        "[Link Looker Histórico](https://lookerstudio.google.com/reporting/fea42c5d-6b62-4f18-846e-4a97d90610df)"
+if activar_performance:
+    uploaded_file = st.sidebar.file_uploader(
+        "Cargar datos del Operations Center (Performance)",
+        type=["csv", "xlsx"],
+        key="perf_file"
     )
-    archivo_historico = st.sidebar.file_uploader("Subir archivo CSV Histórico", type=["csv"])
-    if archivo_historico:
-        df_h_raw = pd.read_csv(archivo_historico)
-        meses_map = {'ene': 1, 'feb': 2, 'mar': 3, 'abr': 4, 'may': 5, 'jun': 6, 'jul': 7, 'ago': 8, 'sept': 9,
-                     'oct': 10, 'nov': 11, 'dic': 12}
 
+    if uploaded_file is not None:
+        try:
+            if uploaded_file.name.endswith('.csv'):
+                df = pd.read_csv(uploaded_file)
+            else:
+                df = pd.read_excel(uploaded_file)
 
-        def parse_fecha(texto):
-            try:
-                partes = texto.split()
-                return pd.Timestamp(year=int(partes[1]), month=meses_map[partes[0].lower()], day=1)
-            except:
-                return pd.Timestamp(year=2000, month=1, day=1)
+            df.columns = df.columns.str.strip()
 
+            if 'Máquina' in df.columns:
+                df = df.dropna(subset=['Máquina'])
+                opciones_maquinas = df['Máquina'].unique().tolist()
 
-        fechas_unicas = df_h_raw['Fecha de terminación (Año y mes)'].unique()
-        fechas_ordenadas = sorted(fechas_unicas, key=parse_fecha)
-        rango_hist = st.sidebar.select_slider("Rango del Histórico", options=fechas_ordenadas,
-                                              value=(fechas_ordenadas[0], fechas_ordenadas[-1]))
+                maquinas_seleccionadas = st.sidebar.multiselect(
+                    "Seleccionar Máquinas para el informe",
+                    options=opciones_maquinas,
+                    default=opciones_maquinas
+                )
+            else:
+                st.sidebar.error("No se encontró la columna 'Máquina' en el archivo de performance.")
+        except Exception as e:
+            st.sidebar.error(f"Error al cargar archivo de performance: {e}")
+    else:
+        st.sidebar.info("Subí el archivo de Performance para comenzar.")
+
+st.sidebar.markdown("---")
+
+# --- SECCIÓN 2: CALIDAD DE REGISTRO ---
+st.sidebar.subheader("📋 2. Calidad de Registro")
+agregar_calidad = st.sidebar.checkbox("Agregar análisis de Calidad de Registro", value=False)
+
+calidad_datos = {}
+if agregar_calidad:
+    st.sidebar.caption("Completar totales vs. datos correctos:")
+
+    st.sidebar.markdown("**Asignación de Variedad**")
+    v_totales = st.sidebar.number_input("Total de Mapas de Cosecha:", min_value=1, value=10, key="v_tot")
+    v_correctos = st.sidebar.number_input("Mapas con Variedad Cargada:", min_value=0, max_value=v_totales, value=8, key="v_corr")
+
+    st.sidebar.markdown("**Mapas Cargados Correctamente**")
+    m_totales = st.sidebar.number_input("Total de Mapas del Período:", min_value=1, value=12, key="m_tot")
+    m_correctos = st.sidebar.number_input("Mapas sin Errores/Superposiciones:", min_value=0, max_value=m_totales, value=11, key="m_corr")
+
+    st.sidebar.markdown("**Nombramiento de Campos**")
+    c_totales = st.sidebar.number_input("Total de Campos Registrados:", min_value=1, value=15, key="c_tot")
+    c_correctos = st.sidebar.number_input("Campos con Nombre Correcto (sin duplicados):", min_value=0, max_value=c_totales, value=12, key="c_corr")
+
+    st.sidebar.markdown("**Límites de Campos**")
+    l_totales = st.sidebar.number_input("Total de Campos en Org:", min_value=1, value=15, key="l_tot")
+    l_correctos = st.sidebar.number_input("Campos con Límites Correctos/Activos:", min_value=0, max_value=l_totales, value=9, key="l_corr")
+
+    calidad_datos = {
+        'Asignación de Variedad': (v_correctos / v_totales) * 100,
+        'Mapas sin Errores': (m_correctos / m_totales) * 100,
+        'Nombramiento de Campos': (c_correctos / c_totales) * 100,
+        'Límites Definitivos': (l_correctos / l_totales) * 100
+    }
+
+st.sidebar.markdown("---")
+
+# --- SECCIÓN 3: DATOS AGRONÓMICOS ---
+st.sidebar.subheader("🌾 3. Datos Agronómicos")
+agregar_agronómico = st.sidebar.checkbox("Agregar análisis de datos agronómicos", value=False)
+
+hectareas_filtro = 2.0
+df_agro = None
+
+if agregar_agronómico:
+    uploaded_agro_file = st.sidebar.file_uploader(
+        "Cargar datos de Cosecha (.xlsx/.csv)",
+        type=["csv", "xlsx"],
+        key="agro_file"
+    )
+
+    hectareas_filtro = st.sidebar.number_input(
+        "Filtrar lotes con superficie menor a (ha):",
+        min_value=0.0, max_value=100.0, value=2.0, step=0.5
+    )
+
+    if uploaded_agro_file is not None:
+        try:
+            if uploaded_agro_file.name.endswith('.csv'):
+                df_agro = pd.read_csv(uploaded_agro_file)
+            else:
+                df_agro = pd.read_excel(uploaded_agro_file)
+
+            df_agro.columns = df_agro.columns.str.strip()
+
+            # --- HOMOLOGACIÓN INTELIGENTE DE COLUMNAS ---
+            mapeo_columnas = {
+                'Velocidad': 'Velocidad de trabajo',
+                'Índice de combustible (área)': 'Consumo de combustible por unidad de superficie',
+                'Rendimiento (seco)': 'Productividad_th'
+            }
+            df_agro = df_agro.rename(columns=mapeo_columnas)
+
+            # Limpieza de filas de control
+            df_agro = df_agro[(df_agro['Nombre de máquina'] != 'Unidad') & (df_agro['Nombre de máquina'] != '---')]
+            df_agro = df_agro.dropna(subset=['Nombre de máquina'])
+
+            # Forzamos conversión numérica de las columnas clave
+            columnas_numericas = [
+                'Superficie cosechada', 'Rendimiento en seco', 'Rendimiento seco total',
+                'Velocidad de trabajo', 'Consumo de combustible por unidad de superficie',
+                'Productividad_th', 'Productividad'
+            ]
+            for col in columnas_numericas:
+                if col in df_agro.columns:
+                    df_agro[col] = pd.to_numeric(df_agro[col], errors='coerce')
+
+            # Parsear la columna de fecha para la serie histórica
+            if 'Primera cosecha' in df_agro.columns:
+                df_agro['Fecha_Formateada'] = pd.to_datetime(df_agro['Primera cosecha'], errors='coerce')
+
+        except Exception as e:
+            st.sidebar.error(f"Error al cargar el archivo agronómico: {e}")
 
 # --- CUERPO DEL INFORME ---
-if archivo_subido is not None and not df_final.empty:
-    st.title("🚜 Auditoría de Tecnología en Cosechadoras")
-    st.subheader(f"Análisis para: {razon_social_input if razon_social_input else 'Flota Seleccionada'}")
+st.title("Cierre de Campaña")
 
-    total_has_segmento = pd.to_numeric(df_final['Superficie cosechada'], errors='coerce').sum()
-    total_comb = pd.to_numeric(df_final['Combustible total'], errors='coerce').sum()
+if df is not None and len(df) > 0 and activar_performance:
+    fecha_inicio_raw = df['Fecha de inicio'].dropna().iloc[0] if 'Fecha de inicio' in df.columns else "N/D"
+    fecha_fin_raw = df['Fecha de terminación'].dropna().iloc[0] if 'Fecha de terminación' in df.columns else "N/D"
+    fecha_inicio = str(fecha_inicio_raw).split()[0] if fecha_inicio_raw != "N/D" else "N/D"
+    fecha_fin = str(fecha_fin_raw).split()[0] if fecha_fin_raw != "N/D" else "N/D"
+else:
+    fecha_inicio, fecha_fin = "N/D", "N/D"
 
-    c_prom = total_comb / total_has_segmento if total_has_segmento > 0 else 0
+col_header1, col_header2 = st.columns(2)
+with col_header1:
+    if razon_social:
+        st.subheader(f"Cliente: {razon_social}")
+    else:
+        st.subheader("Cliente: _Razón Social no especificada_")
+with col_header2:
+    st.markdown(f"<p style='text-align: right; font-size: 1.2rem; font-weight: bold; color: #4caf50;'>📅 Período: {fecha_inicio} al {fecha_fin}</p>", unsafe_allow_html=True)
 
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Inicio", df_final['Primera cosecha'].min().strftime('%d/%m/%Y') if pd.notna(
-        df_final['Primera cosecha'].min()) else "N/A")
-    c2.metric("Fin", df_final['Último cosechado'].max().strftime('%d/%m/%Y') if pd.notna(
-        df_final['Último cosechado'].max()) else "N/A")
-    c3.metric("Total Hectáreas", f"{total_has_segmento:,.1f} Has")
-    c4.metric("Consumo Total", f"{total_comb:,.0f} Lts")
-    c5.metric("Promedio L/Ha", f"{c_prom:.2f}")
+st.markdown("---")
 
-    st.divider()
-    st.subheader("🌾 Rendimientos Promedio por Cultivo")
-    cultivos_en_data = sorted(list(df_final['Tipo de cultivo'].dropna().unique()))
-    rtos_cols = st.columns(len(cultivos_en_data)) if cultivos_en_data else [st.container()]
+# --- DISPLAY SECCIÓN 1: PERFORMANCE ---
+if activar_performance:
+    st.header("1. Performance de Maquinaria")
 
-    dict_rtos = {
-        cult: pd.to_numeric(df_final[df_final['Tipo de cultivo'] == cult]['Peso húmedo'], errors='coerce').mean() for
-        cult in cultivos_en_data}
+    if df is not None and maquinas_seleccionadas:
+        df_filtrado = df[df['Máquina'].isin(maquinas_seleccionadas)]
 
-    for i, cult in enumerate(cultivos_en_data):
-        val_rto = dict_rtos[cult] if pd.notna(dict_rtos[cult]) else 0.0
-        rtos_cols[i].metric(f"Rto {cult}", f"{val_rto:.2f} tn/ha")
-
-    st.divider()
-    st.subheader("🛠️ Auditoría de Uso e Impacto Económico")
-    maquinas_sel = st.multiselect("Seleccionar máquinas para el análisis:",
-                                  options=sorted(list(df_final['Nombre de máquina'].unique())),
-                                  default=sorted(list(df_final['Nombre de máquina'].unique())))
-
-    if maquinas_sel:
-        df_maquinas = df_final[df_final['Nombre de máquina'].isin(maquinas_sel)]
-        total_has_maquinas = pd.to_numeric(df_maquinas['Superficie cosechada'], errors='coerce').sum()
-
-        t_ahorro_c = 0.0
-        t_ahorro_g = 0.0
-        t_oculto = 0.0
-        tecs_av = set()
-        tecs_aj = set()
-
-        h1, h2, h3, h4, h5, h6 = st.columns([1.5, 1, 1.5, 1, 1.5, 1])
-        h1.caption("**Máquina**")
-        h2.caption("**Has**")
-        h3.caption("**Tec. Avance**")
-        h4.caption("**% Uso**")
-        h5.caption("**Tec. Ajuste**")
-        h6.caption("**% Uso**")
-
-        for maq in maquinas_sel:
-            df_m = df_maquinas[df_maquinas['Nombre de máquina'] == maq]
-            h_m = pd.to_numeric(df_m['Superficie cosechada'], errors='coerce').sum()
-
-            try:
-                cult_p = df_m.groupby('Tipo de cultivo')['Superficie cosechada'].sum().idxmax()
-                rto_ref = dict_rtos[cult_p] if pd.notna(dict_rtos[cult_p]) else 0.0
-            except:
-                rto_ref = 0.0
-
-            r1, r2, r3, r4, r5, r6 = st.columns([1.5, 1, 1.5, 1, 1.5, 1])
-            r1.write(f"**{maq}**")
-            r2.write(f"{h_m:,.1f}")
-            t1 = r3.selectbox(f"T1_{maq}", ["HarvestSmart", "PGSA", "Sin Tecnología"], key=f"t1_{maq}",
-                              label_visibility="collapsed")
-            u1 = r4.number_input(f"U1_{maq}", 0, 100, 0, step=5, key=f"u1_{maq}", label_visibility="collapsed")
-            t2 = r5.selectbox(f"T2_{maq}", ["AutoMaintain", "PSA", "Sin Tecnología"], key=f"t2_{maq}",
-                              label_visibility="collapsed")
-            u2 = r6.number_input(f"U2_{maq}", 0, 100, 0, step=5, key=f"u2_{maq}", label_visibility="collapsed")
-
-            if t1 != "Sin Tecnología" and u1 > 0: tecs_av.add(t1)
-            if t2 != "Sin Tecnología" and u2 > 0: tecs_aj.add(t2)
-
-            v_c = (ah_hs_l_ha if t1 == "HarvestSmart" else (ah_pgsa_l_ha if t1 == "PGSA" else 0)) * precio_gasoil
-            v_g = 0
-            if t2 == "AutoMaintain":
-                v_g = (((p_sin_am - p_con_am) / 1000) * precio_grano_usd) + (precio_grano_usd * rto_ref * castigo_am)
-            elif t2 == "PSA":
-                v_g = (((p_sin_psa - p_con_psa) / 1000) * precio_grano_usd) + (precio_grano_usd * rto_ref * castigo_psa)
-
-            t_ahorro_c += (h_m * (u1 / 100) * v_c)
-            t_ahorro_g += (h_m * (u2 / 100) * v_g)
-            t_oculto += (h_m * (1 - u1 / 100) * v_c) + (h_m * (1 - u2 / 100) * v_g)
+        st.markdown("### Equipos en Análisis")
+        cols = st.columns(min(len(df_filtrado), 4))
+        for idx, (_, row) in enumerate(df_filtrado.iterrows()):
+            with cols[idx % min(len(df_filtrado), 4)]:
+                sn = row.get('Número de serie de la máquina', 'N/D')
+                modelo = row.get('Modelo', 'N/D')
+                st.info(f"**{row['Máquina']}**\n\n*Modelo:* {modelo}\n\n*S/N:* `{sn}`")
 
         st.markdown("---")
-        col_res, col_param, col_pie = st.columns([1, 1, 1])
-        with col_res:
-            st.write("##### 💰 Resultado Económico Actual")
-            ah_total = t_ahorro_c + t_ahorro_g
-            pot_t = ah_total + t_oculto
-            st.markdown(f"<h3 style='color: #28a745; margin-bottom: 0;'>USD {ah_total:,.0f}</h3>",
-                        unsafe_allow_html=True)
-            st.caption(f"Ahorro Real")
-            st.markdown(f"<h3 style='color: #dc3545; margin-bottom: 0;'>USD {t_oculto:,.0f}</h3>",
-                        unsafe_allow_html=True)
-            st.caption("Costo Oculto")
-            st.markdown(f"<h3 style='color: #007bff; margin-bottom: 0;'>USD {pot_t:,.0f}</h3>", unsafe_allow_html=True)
-            st.caption("Potencial Total")
-            efic = (ah_total / pot_t * 100) if pot_t > 0 else 0
-            st.write(f"**Eficiencia: {efic:.1f}%**")
-            st.progress(efic / 100)
+        st.markdown("### Análisis Individual por Equipo")
 
-        with col_param:
-            st.write("##### 📝 Detalle de Tecnologías y Calidad")
-            if "HarvestSmart" in tecs_av: st.write(f"🚜 **HarvestSmart:** -{ah_hs_l_ha} L/ha")
-            if "PGSA" in tecs_av: st.write(f"🚜 **PGSA:** -{ah_pgsa_l_ha} L/ha")
-            if "AutoMaintain" in tecs_aj:
-                st.write(f"✅ **AutoMaintain:** -{p_sin_am - p_con_am:.0f} kg/ha")
-                st.caption(f"Rotos: {r_am_s}% → {r_am_c}% | Imp: {i_am_s}% → {i_am_c}%")
-            if "PSA" in tecs_aj:
-                st.write(f"✅ **PSA:** -{p_sin_psa - p_con_psa:.0f} kg/ha")
-                st.caption(f"Rotos: {r_psa_s}% → {r_psa_c}% | Imp: {i_psa_s}% → {i_psa_c}%")
+        for maquina in maquinas_seleccionadas:
+            row_m = df_filtrado[df_filtrado['Máquina'] == maquina].iloc[0]
+            modelo_maquina = str(row_m.get('Modelo', '')).upper().strip()
 
-        with col_pie:
-            fig_pie = px.pie(values=[t_ahorro_c, t_ahorro_g, t_oculto], names=['Combustible', 'Granos', 'Costo Oculto'],
-                             color_discrete_sequence=['#2ca02c', '#ff7f0e', '#dc3545'], hole=0.4)
-            fig_pie.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=230)
-            st.plotly_chart(fig_pie, use_container_width=True)
+            with st.expander(f"🚜 Análisis Detallado - {maquina} ({modelo_maquina})", expanded=True):
+                kpi_col1, kpi_col2, kpi_col3 = st.columns(3)
 
-        # --- SECCIÓN HISTÓRICO Y COMPARATIVA ---
-        if activar_historico and archivo_historico and rango_hist:
-            st.divider()
-            st.subheader("📈 Evolución de Adopción Tecnológica por Sistema")
-            idx_inicio = fechas_ordenadas.index(rango_hist[0])
-            idx_fin = fechas_ordenadas.index(rango_hist[1])
-            fechas_rango = fechas_ordenadas[idx_inicio:idx_fin + 1]
-            df_h = df_h_raw[df_h_raw['Fecha de terminación (Año y mes)'].isin(fechas_rango)].copy()
-            df_h['temp_date'] = df_h['Fecha de terminación (Año y mes)'].apply(parse_fecha)
-            df_h = df_h.sort_values('temp_date')
+                with kpi_col1:
+                    horas_periodo = row_m.get('Horas de trabajo del motor Período (h)', 0)
+                    horas_vida = row_m.get('Horas de trabajo del motor Vida útil (h)', 0)
+                    horas_periodo = 0.0 if pd.isna(horas_periodo) else horas_periodo
+                    horas_vida = 0.0 if pd.isna(horas_vida) else horas_vida
+                    st.metric(label="Horas de Motor (En Período)", value=f"{horas_periodo:,.1f} h",
+                              delta=f"Total Vida Útil: {horas_vida:,.1f} h", delta_color="normal")
 
-            # --- GRÁFICO CON 4 SERIES ---
-            fig_h = go.Figure()
-            fig_h.add_trace(
-                go.Scatter(x=df_h['Fecha de terminación (Año y mes)'], y=df_h['Harvest Smart Activado (%)'] * 100,
-                           mode='lines+markers', name='Harvest Smart', line=dict(color='#FFDE00', width=3)))
-            fig_h.add_trace(
-                go.Scatter(x=df_h['Fecha de terminación (Año y mes)'], y=df_h['Auto Maintain Activado (%)'] * 100,
-                           mode='lines+markers', name='Auto Maintain', line=dict(color='#367C2B', width=3)))
-            fig_h.add_trace(go.Scatter(x=df_h['Fecha de terminación (Año y mes)'],
-                                       y=df_h['Automatización de la velocidad de avance Activo (%)'] * 100,
-                                       mode='lines+markers', name='PGSA (S7)',
-                                       line=dict(color='#007bff', width=3, dash='dash')))
-            fig_h.add_trace(go.Scatter(x=df_h['Fecha de terminación (Año y mes)'],
-                                       y=df_h['Automatización de ajustes de cosecha Activo (%)'] * 100,
-                                       mode='lines+markers', name='PSA (S7)',
-                                       line=dict(color='#28a745', width=3, dash='dash')))
+                with kpi_col2:
+                    co2 = row_m.get('Emisiones de combustible Período (kg CO2e)', 0)
+                    co2 = 0 if pd.isna(co2) else co2
+                    st.metric(label="Emisiones de CO₂", value=f"{co2:,.0f} kg CO2e")
 
-            fig_h.update_layout(hovermode="x unified", yaxis_title="Uso (%)", template="plotly_white", height=400,
-                                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-            st.plotly_chart(fig_h, use_container_width=True)
+                with kpi_col3:
+                    t_soja = row_m.get('Tiempo en soja (h)', 0)
+                    t_maiz = row_m.get('Tiempo en maíz (h)', 0)
+                    t_soja = 0 if pd.isna(t_soja) else t_soja
+                    t_maiz = 0 if pd.isna(t_maiz) else t_maiz
 
-            st.subheader("🔄 Participación de Tecnología (Inicio vs. Fin)")
-            st.write(f"Distribuí las **{total_has_maquinas:,.1f} Has** totales según la flota de ese momento:")
+                    st.markdown("**Distribución de Tiempo por Cultivo**")
+                    if t_soja > 0 or t_maiz > 0:
+                        fig_cultivo = go.Figure(go.Bar(
+                            x=[t_soja, t_maiz], y=['Soja ', 'Maíz '], orientation='h',
+                            marker_color=['#9ccc65', '#ffca28'], text=[f"{t_soja:,.1f} h", f"{t_maiz:,.1f} h"],
+                            textposition='inside'
+                        ))
+                        fig_cultivo.update_layout(height=140, margin=dict(l=10, r=10, t=10, b=10),
+                                                 xaxis=dict(showgrid=False, visible=False),
+                                                 yaxis=dict(autorange="reversed"))
+                        st.plotly_chart(fig_cultivo, use_container_width=True, key=f"cultivo_{maquina}")
+                    else:
+                        st.caption("No se registraron horas específicas de trilla.")
 
-            col_ini, col_fin = st.columns(2)
-            with col_ini:
-                st.markdown(f"📅 **Inicio: {rango_hist[0]}**")
-                has_s7_ini = st.slider("Has para S7 / Has para S700", 0.0, float(total_has_maquinas),
-                                       float(total_has_maquinas / 2), key="s7_ini")
-                has_s700_ini = total_has_maquinas - has_s7_ini
-                st.caption(f"S7: {has_s7_ini:,.1f} ha | S700: {has_s700_ini:,.1f} ha")
+                st.markdown("#### Eficiencia y Estado del Motor")
+                graf_comb, term_motor = st.columns([2, 1])
 
-            with col_fin:
-                st.markdown(f"📅 **Fin: {rango_hist[1]}**")
-                has_s7_fin = st.slider("Has para S7 / Has para S700", 0.0, float(total_has_maquinas),
-                                       float(total_has_maquinas / 2), key="s7_fin")
-                has_s700_fin = total_has_maquinas - has_s7_fin
-                st.caption(f"S7: {has_s7_fin:,.1f} ha | S700: {has_s700_fin:,.1f} ha")
+                with graf_comb:
+                    st.markdown("**Distribución de Combustible Consumido (Litros / %)**")
+                    c_trabajo = row_m.get('Combustible consumido Trabajo (l)', 0)
+                    c_ralenti = row_m.get('Combustible consumido Ralentí (l)', 0)
+                    c_transp = row_m.get('Combustible consumido Transporte (l)', 0)
 
-            rto_prom = sum(dict_rtos.values()) / len(dict_rtos) if dict_rtos else 0
-            v_c_s7 = ah_pgsa_l_ha * precio_gasoil
-            v_g_s7 = (((p_sin_psa - p_con_psa) / 1000) * precio_grano_usd) + (precio_grano_usd * rto_prom * castigo_psa)
-            v_c_s700 = ah_hs_l_ha * precio_gasoil
-            v_g_s700 = (((p_sin_am - p_con_am) / 1000) * precio_grano_usd) + (precio_grano_usd * rto_prom * castigo_am)
+                    c_trabajo = 0 if pd.isna(c_trabajo) else c_trabajo
+                    c_ralenti = 0 if pd.isna(c_ralenti) else c_ralenti
+                    c_transp = 0 if pd.isna(c_transp) else c_transp
+                    c_total = c_trabajo + c_ralenti + c_transp
 
+                    if c_total > 0:
+                        p_trabajo = (c_trabajo / c_total) * 100
+                        p_ralenti = (c_ralenti / c_total) * 100
+                        p_transp = (c_transp / c_total) * 100
 
-            def calcular_impacto_ponderado(row, h_s7, h_s700):
-                u_hs = row['Harvest Smart Activado (%)']
-                u_am = row['Auto Maintain Activado (%)']
-                u_pgsa = row['Automatización de la velocidad de avance Activo (%)']
-                u_psa = row['Automatización de ajustes de cosecha Activo (%)']
+                        fig_comb = go.Figure()
+                        fig_comb.add_trace(go.Bar(
+                            name='Trabajo', y=['Combustible'], x=[c_trabajo], orientation='h', marker_color='#2ca02c',
+                            text=[f"{c_trabajo:,.0f} L ({p_trabajo:.1f}%)" if c_trabajo > 0 else ""],
+                            textposition='inside'
+                        ))
+                        fig_comb.add_trace(go.Bar(
+                            name='Ralentí', y=['Combustible'], x=[c_ralenti], orientation='h', marker_color='#ff7f0e',
+                            text=[f"{c_ralenti:,.0f} L ({p_ralenti:.1f}%)" if c_ralenti > 0 else ""],
+                            textposition='inside'
+                        ))
+                        fig_comb.add_trace(go.Bar(
+                            name='Transporte', y=['Combustible'], x=[c_transp], orientation='h', marker_color='#7f7f7f',
+                            text=[f"{c_transp:,.0f} L ({p_transp:.1f}%)" if c_transp > 0 else ""], textposition='inside'
+                        ))
+                        fig_comb.update_layout(barmode='stack', height=180, margin=dict(l=10, r=10, t=10, b=10),
+                                               legend=dict(orientation="h", y=1.2))
+                        st.plotly_chart(fig_comb, use_container_width=True, key=f"comb_{maquina}")
+                    else:
+                        st.caption("Sin datos de combustible.")
 
-                u_pgsa = 0 if pd.isna(u_pgsa) else u_pgsa
-                u_psa = 0 if pd.isna(u_psa) else u_psa
+                with term_motor:
+                    st.markdown("**Factor de Carga Promedio del Motor**")
+                    factor_carga = row_m.get('Factor de carga prom del motor En funcionamiento (%)', 0)
+                    if not pd.isna(factor_carga) and factor_carga > 0:
+                        if factor_carga <= 1.0: factor_carga *= 100
 
-                ahorro = (h_s7 * (u_pgsa * v_c_s7 + u_psa * v_g_s7)) + (h_s700 * (u_hs * v_c_s700 + u_am * v_g_s700))
-                oculto = (h_s7 * ((1 - u_pgsa) * v_c_s7 + (1 - u_psa) * v_g_s7)) + (
-                        h_s700 * ((1 - u_hs) * v_c_s700 + (1 - u_am) * v_g_s700))
-                return ahorro, oculto
+                        es_nueva_s7 = "S7" in modelo_maquina
+                        if es_nueva_s7:
+                            color_term = "#28a745"
+                            status_text = "✅ Carga Eficiente (Nueva Serie S7)"
+                            steps_config = [{'range': [0, 100], 'color': "#c8e6c9"}]
+                        else:
+                            if factor_carga >= 90:
+                                color_term = "#dc3545"
+                                status_text = "⚠️ CARGA CRÍTICA (>90%)"
+                            elif factor_carga >= 85:
+                                color_term = "#ffc107"
+                                status_text = "⚠️ Carga Moderada (85-90%)"
+                            else:
+                                color_term = "#28a745"
+                                status_text = "✅ Carga Normal (<85%)"
+                            steps_config = [{'range': [0, 85], 'color': "#e0e0e0"},
+                                            {'range': [85, 90], 'color': "#ffe082"},
+                                            {'range': [90, 100], 'color': "#ffcdd2"}]
 
+                        fig_gauge = go.Figure(go.Indicator(
+                            mode="gauge+number", value=factor_carga, number={'suffix': "%"},
+                            gauge={'axis': {'range': [0, 100]}, 'bar': {'color': color_term}, 'steps': steps_config}
+                        ))
+                        fig_gauge.update_layout(height=150, margin=dict(l=20, r=20, t=10, b=10))
+                        st.plotly_chart(fig_gauge, use_container_width=True, key=f"gauge_{maquina}")
+                        st.markdown(f"<p style='text-align: center; font-weight: bold; color: {color_term};'>{status_text}</p>", unsafe_allow_html=True)
+                    else:
+                        st.caption("Sin datos de factor de carga.")
 
-            h_inicio = df_h.iloc[0]
-            h_fin = df_h.iloc[-1]
-            ah_ini, oc_ini = calcular_impacto_ponderado(h_inicio, has_s7_ini, has_s700_ini)
-            ah_fin, oc_fin = calcular_impacto_ponderado(h_fin, has_s7_fin, has_s700_fin)
+        st.markdown("---")
+        st.header("2. Eficiencia de Operación y Tecnologías")
+        st.markdown("### Comparativa de Technology de Guiado por Equipo")
 
-            st.markdown("---")
-            comp1, comp2 = st.columns(2)
-            with comp1:
-                st.metric("Ahorro Real (Inicio)", f"USD {ah_ini:,.0f}")
-                st.metric("Costo Oculto (Inicio)", f"USD {oc_ini:,.0f}")
-            with comp2:
-                st.metric("Ahorro Real (Fin)", f"USD {ah_fin:,.0f}", delta=f"↑ USD {ah_fin - ah_ini:,.0f}")
-                st.metric("Costo Oculto (Fin)", f"USD {oc_fin:,.0f}")
+        def normalizar_porcentaje(val):
+            if pd.isna(val): return 0.0
+            return val * 100 if val <= 1.0 else val
 
-    with st.expander("📂 Ver registros detallados"):
-        st.dataframe(df_final, use_container_width=True)
-else:
-    st.info("👋 Por favor, carga el archivo de cosecha para iniciar la auditoría.")
+        datos_guiado = []
+        datos_cosechadora = []
+
+        for _, row in df_filtrado.iterrows():
+            m_name = row['Máquina']
+            at = normalizar_porcentaje(row.get('AutoTrac™ Activo (%)', 0))
+            ap = normalizar_porcentaje(row.get('AutoPath™ Activo (%)', 0))
+            am = normalizar_porcentaje(row.get('Automatización de maniobras AutoTrac™ Activo (%)', 0))
+            ms = normalizar_porcentaje(row.get('John Deere Machine Sync Vehículo guía activo (%)', 0))
+
+            datos_guiado.append({'Máquina': m_name, 'Tecnología': 'AutoTrac™', 'Porcentaje': at})
+            datos_guiado.append({'Máquina': m_name, 'Tecnología': 'AutoPath™', 'Porcentaje': ap})
+            datos_guiado.append({'Máquina': m_name, 'Tecnología': 'Automatización Maniobras (iTEC)', 'Porcentaje': am})
+            datos_guiado.append({'Máquina': m_name, 'Tecnología': 'Machine Sync (Guía)', 'Porcentaje': ms})
+
+            ata = normalizar_porcentaje(row.get('Active Terrain Adjustment™ Activado (%)', 0))
+            ay = normalizar_porcentaje(row.get('ActiveYield™ Activado (%)', 0))
+            hs = normalizar_porcentaje(row.get('Harvest Smart Activado (%)', 0))
+            amaintain = normalizar_porcentaje(row.get('Auto Maintain Activado (%)', 0))
+            ajustes_c = normalizar_porcentaje(row.get('Automatización de los ajustes de cosecha Activo (%)', 0))
+            tech_ajustes = ajustes_c if ajustes_c > 0 else amaintain
+            vel_avance = normalizar_porcentaje(row.get('Automatización de la velocidad de avance Activo (%)', 0))
+
+            datos_cosechadora.append({'Máquina': m_name, 'Tecnología': 'Active Terrain Adjustment™', 'Porcentaje': ata})
+            datos_cosechadora.append({'Máquina': m_name, 'Tecnología': 'ActiveYield™', 'Porcentaje': ay})
+            datos_cosechadora.append({'Máquina': m_name, 'Tecnología': 'Harvest Smart', 'Porcentaje': hs})
+            datos_cosechadora.append({'Máquina': m_name, 'Tecnología': 'Ajustes de Cosecha / Auto Maintain', 'Porcentaje': tech_ajustes})
+            datos_cosechadora.append({'Máquina': m_name, 'Tecnología': 'Automatización Vel. Avance', 'Porcentaje': vel_avance})
+
+        df_guiado_plot = pd.DataFrame(datos_guiado)
+        df_cosechadora_plot = pd.DataFrame(datos_cosechadora)
+
+        fig_guiado = px.bar(df_guiado_plot, x='Máquina', y='Porcentaje', color='Tecnología', barmode='group',
+                            text=df_guiado_plot['Porcentaje'].apply(lambda x: f"{x:.1f}%" if x > 0 else ""),
+                            color_discrete_sequence=['#367c2b', '#ffde00', '#204d19', '#9ccc65'])
+        fig_guiado.update_layout(yaxis=dict(range=[0, 115]), height=400,
+                                 legend=dict(orientation="h", y=1.1, x=0.5, xanchor="center"))
+        st.plotly_chart(fig_guiado, use_container_width=True)
+
+        st.markdown("---")
+        st.markdown("### Comparativa de Automatización de Cosechadora por Equipo")
+
+        fig_cosechadora = px.bar(df_cosechadora_plot, x='Máquina', y='Porcentaje', color='Tecnología', barmode='group',
+                                 text=df_cosechadora_plot['Porcentaje'].apply(lambda x: f"{x:.1f}%" if x > 0 else ""),
+                                 color_discrete_sequence=['#1b5e20', '#2e7d32', '#4caf50', '#81c784', '#a5d6a7'])
+        fig_cosechadora.update_layout(yaxis=dict(range=[0, 115]), height=400,
+                                      legend=dict(orientation="h", y=1.1, x=0.5, xanchor="center"))
+        st.plotly_chart(fig_cosechadora, use_container_width=True)
+
+# --- DISPLAY SECCIÓN 2: CALIDAD DE REGISTRO ---
+if agregar_calidad:
+    st.markdown("---")
+    st.header("3. Calidad de Registro y Limpieza de Datos")
+
+    calidad_general = sum(calidad_datos.values()) / len(calidad_datos)
+    if calidad_general >= 85:
+        color_general = "#28a745"
+    elif calidad_general >= 70:
+        color_general = "#ffc107"
+    else:
+        color_general = "#dc3545"
+
+    col_cal1, col_cal2 = st.columns([1, 2])
+    with col_cal1:
+        st.markdown("### Calidad Digital General")
+        st.markdown(f"""
+        <div style='background-color: #f8f9fa; border-left: 8px solid {color_general}; padding: 20px; border-radius: 5px; text-align: center;'>
+            <p style='margin: 0; font-size: 1.1rem; font-weight: bold; color: #6c757d;'>Score General de la Organización</p>
+            <h1 style='margin: 10px 0; color: {color_general}; font-size: 3.5rem;'>{calidad_general:.1f}%</h1>
+            <p style='margin: 0; font-size: 0.9rem; font-style: italic; color: #495057;'>Establece el nivel de confianza de los reportes digitales del Operations Center.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_cal2:
+        st.markdown("### Desglose de Cumplimiento")
+        df_calidad = pd.DataFrame({'Indicador': list(calidad_datos.keys()), 'Porcentaje': list(calidad_datos.values())})
+        fig_calidad = px.bar(df_calidad, x='Porcentaje', y='Indicador', orientation='h',
+                             text=df_calidad['Porcentaje'].apply(lambda x: f"{x:.1f}%"),
+                             labels={'Porcentaje': '% de Avance', 'Indicador': 'Área de Control'}, color='Porcentaje',
+                             color_continuous_scale=['#ffcdd2', '#ffe082', '#a5d6a7', '#2e7d32'])
+        fig_calidad.update_traces(textposition='inside', textfont_size=12, textfont_weight='bold')
+        fig_calidad.update_layout(xaxis=dict(range=[0, 105]), height=220, coloraxis_showscale=False,
+                                  margin=dict(l=10, r=10, t=10, b=10))
+        st.plotly_chart(fig_calidad, use_container_width=True)
+
+# --- DISPLAY SECCIÓN 3: DATOS AGRONÓMICOS ---
+if agregar_agronómico:
+    st.markdown("---")
+    num_seccion = "4" if agregar_calidad else "3"
+    st.header(f"{num_seccion}. Análisis de Datos Agronómicos")
+
+    if df_agro is not None and len(df_agro) > 0:
+        df_base_filtrada = df_agro[df_agro['Superficie cosechada'] >= hectareas_filtro].copy()
+
+        if len(df_base_filtrada) == 0:
+            st.warning(f"No hay registros con una superficie mayor o igual a {hectareas_filtro} ha.")
+        else:
+            st.caption(f"ℹ️ Mostrando datos agrupados de lotes con superficies iguales o mayores a **{hectareas_filtro} ha**.")
+            cultivos_disponibles = df_base_filtrada['Tipo de cultivo'].dropna().unique().tolist()
+
+            for cultivo in cultivos_disponibles:
+                df_c = df_base_filtrada[df_base_filtrada['Tipo de cultivo'] == cultivo].copy()
+                st.markdown(f"## 🌾 Cultivo Analizado: {str(cultivo).upper()}")
+
+                # --- KPIs GLOBALES DEL CULTIVO ---
+                sup_total_c = df_c['Superficie cosechada'].sum()
+                df_rinde_valido_c = df_c[df_c['Rendimiento en seco'] > 0]
+                rinde_prom_c = df_rinde_valido_c['Rendimiento en seco'].mean() if len(df_rinde_valido_c) > 0 else 0
+
+                if 'Rendimiento seco total' in df_c.columns:
+                    ton_totales_c = df_c['Rendimiento seco total'].sum()
+                else:
+                    ton_totales_c = sup_total_c * rinde_prom_c
+
+                kpi_g1, kpi_g2, kpi_g3 = st.columns(3)
+                with kpi_g1:
+                    st.metric(label="Superficie Total Cosechada", value=f"{sup_total_c:,.1f} ha")
+                with kpi_g2:
+                    st.metric(label="Rendimiento Promedio", value=f"{rinde_prom_c:.2f} t/ha")
+                with kpi_g3:
+                    st.metric(label="Producción Total", value=f"{ton_totales_c:,.1f} t")
+
+                # --- 1. DATOS DE MAQUINARIA (SUPERFICIE Y VELOCIDAD) ---
+                st.markdown("#### 🚜 Performance de Equipos en el Cultivo")
+                col_m1, col_m2 = st.columns(2)
+
+                with col_m1:
+                    df_sup_maq = df_c.groupby('Nombre de máquina')['Superficie cosechada'].sum().reset_index()
+                    fig_sup_maq = px.bar(
+                        df_sup_maq, x='Nombre de máquina', y='Superficie cosechada',
+                        text=df_sup_maq['Superficie cosechada'].apply(lambda x: f"{x:,.1f} ha"),
+                        labels={'Superficie cosechada': 'Superficie (ha)', 'Nombre de máquina': 'Equipo'},
+                        title="Superficie por Equipo", color_discrete_sequence=['#4caf50']
+                    )
+                    fig_sup_maq.update_traces(textposition='outside')
+                    fig_sup_maq.update_layout(yaxis=dict(range=[0, df_sup_maq['Superficie cosechada'].max() * 1.3]),
+                                              height=300, margin=dict(t=40, b=10, l=10, r=10))
+                    st.plotly_chart(fig_sup_maq, use_container_width=True, key=f"sup_maq_{cultivo}")
+
+                with col_m2:
+                    df_vel_valida = df_c[df_c['Velocidad de trabajo'] > 0]
+                    df_vel_maq = df_vel_valida.groupby('Nombre de máquina')['Velocidad de trabajo'].mean().reset_index()
+                    vel_general = df_vel_valida['Velocidad de trabajo'].mean() if len(df_vel_valida) > 0 else 0
+
+                    fig_vel = px.bar(
+                        df_vel_maq, x='Nombre de máquina', y='Velocidad de trabajo',
+                        text=df_vel_maq['Velocidad de trabajo'].apply(lambda x: f"{x:.1f} km/h"),
+                        labels={'Velocidad de trabajo': 'Velocidad (km/h)', 'Nombre de máquina': 'Equipo'},
+                        title="Velocidad Promedio de Cosecha", color_discrete_sequence=['#367c2b']
+                    )
+                    fig_vel.add_hline(y=vel_general, line_dash="dash", line_color="#d32f2f")
+                    fig_vel.update_traces(textposition='outside')
+                    fig_vel.update_layout(yaxis=dict(range=[0, max(df_vel_maq['Factor de carga prom del motor En funcionamiento (%)'].max() if 'Factor de carga prom del motor En funcionamiento (%)' in df_vel_maq.columns else 5, vel_general) * 1.3]),
+                                          height=300, margin=dict(t=40, b=10, l=10, r=10))
+                    st.plotly_chart(fig_vel, use_container_width=True, key=f"vel_maq_{cultivo}")
+
+                # --- EFICIENCIA (L/ha) ---
+                st.markdown("#### 📊 Capacidad y Eficiencia de los Equipos")
+                col_c1, col_c2 = st.columns(2)
+
+                with col_c1:
+                    campo_comb = 'Consumo de combustible por unidad de superficie'
+                    if campo_comb in df_c.columns:
+                        df_comb_valido = df_c[df_c[campo_comb] > 0]
+                        df_litros_ha = df_comb_valido.groupby('Nombre de máquina')[campo_comb].mean().reset_index()
+
+                        fig_lha = px.bar(
+                            df_litros_ha, x='Nombre de máquina', y=campo_comb,
+                            text=df_litros_ha[campo_comb].apply(lambda x: f"{x:.1f} L/ha"),
+                            labels={campo_comb: 'Consumo (L/ha)', 'Nombre de máquina': 'Equipo'},
+                            title="Eficiencia de Combustible", color_discrete_sequence=['#2e7d32']
+                        )
+                        fig_lha.update_traces(textposition='outside')
+                        fig_lha.update_layout(yaxis=dict(range=[0, df_litros_ha[campo_comb].max() * 1.3]),
+                                              height=300, margin=dict(t=40, b=10, l=10, r=10))
+                        st.plotly_chart(fig_lha, use_container_width=True, key=f"lha_{cultivo}")
+
+                with col_c2:
+                    campo_prod = 'Productividad_th'
+                    if campo_prod in df_c.columns:
+                        df_prod_valido = df_c[df_c[campo_prod] > 0]
+                        df_prod_h = df_prod_valido.groupby('Nombre de máquina')[campo_prod].mean().reset_index()
+
+                        fig_prod = px.bar(
+                            df_prod_h, x='Nombre de máquina', y=campo_prod,
+                            text=df_prod_h[campo_prod].apply(lambda x: f"{x:.1f} t/h"),
+                            labels={campo_prod: 'Productividad (t/h)', 'Nombre de máquina': 'Equipo'},
+                            title="Capacidad de Cosecha", color_discrete_sequence=['#ffde00']
+                        )
+                        fig_prod.update_traces(textposition='outside')
+                        fig_prod.update_layout(yaxis=dict(range=[0, df_prod_h[campo_prod].max() * 1.3]),
+                                               height=300, margin=dict(t=40, b=10, l=10, r=10))
+                        st.plotly_chart(fig_prod, use_container_width=True, key=f"prod_{cultivo}")
+
+# --- SECCIÓN FINALES Y ACCIONES DE EXPORTACIÓN ---
+st.markdown("---")
+st.subheader("📥 Acciones del Reporte")
+
+# Botón para simular la generación de PDF y disparar el log automático
+if st.button("Generar Reporte PDF", use_container_width=True):
+    # Aquí irá tu lógica para renderizar/descargar el PDF, pero el registro en GitHub ya se ejecuta de inmediato:
+    cliente_informe = razon_social.strip() if razon_social else "No especificado"
+    registrar_evento_github(st.session_state.usuario, "Exportó Reporte a PDF", cliente=cliente_informe)
+    st.success(f"🎉 ¡Reporte registrado con éxito para {cliente_informe}!")
