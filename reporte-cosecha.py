@@ -280,7 +280,9 @@ if activar_historico:
 # --- CUERPO DEL INFORME ---
 if archivo_subido is not None and not df_final.empty:
     st.title("🚜 Auditoría de Tecnología en Cosechadoras")
-    st.subheader(f"Análisis para: {razon_social_input if razon_social_input else 'Flota Seleccionada'}")
+    
+    nombre_cliente_display = razon_social_seleccionada if razon_social_seleccionada != "Seleccionar Cliente..." else "Flota Seleccionada"
+    st.subheader(f"Análisis para: {nombre_cliente_display}")
 
     total_has_segmento = pd.to_numeric(df_final['Superficie cosechada'], errors='coerce').sum()
     total_comb = pd.to_numeric(df_final['Combustible total'], errors='coerce').sum()
