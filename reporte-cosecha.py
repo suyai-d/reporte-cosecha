@@ -44,7 +44,34 @@ def verificar_usuario(legajo_ingresado):
     except Exception as e:
         st.error(f"💥 Error de conexión: {str(e)}")
         return False
-
+@st.cache_data(ttl=3600)  # Se cachea por 1 hora para optimizar velocidad de carga
+def cargar_organizaciones_conci():
+    """Descarga la lista oficial de clientes de Conci desde el repositorio de GitHub."""
+    url_orgs = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/Orgs CONCI.csv"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    try:
+        response = requests.get(url_orgs, headers=headers, timeout=5)
+        if response.status_code == 200:
+            file_data = response.json()
+            content = base64.b64decode(file_data['content']).decode('utf-8')
+            df_orgs = pd.read_csv(StringIO(content))
+            
+            # Limpieza y ordenamiento alfabético de la columna Organización
+            if 'Organización' in df_orgs.columns:
+                lista_orgs = sorted(df_orgs['Organización'].dropna().unique())
+                return ["Seleccionar Cliente..."] + lista_orgs
+            else:
+                st.error("⚠️ El archivo 'Orgs CONCI.csv' no contiene la columna 'Organización'.")
+                return ["Seleccionar Cliente..."]
+        else:
+            st.error(f"⚠️ No se pudo cargar el listado de organizaciones (Status: {response.status_code}).")
+            return ["Seleccionar Cliente..."]
+    except Exception as e:
+        st.error(f"💥 Error al conectar para traer las organizaciones: {str(e)}")
+        return ["Seleccionar Cliente..."]
 
 def registrar_evento_github(usuario, accion, cliente="N/A"):
     """Intenta escribir en GitHub y muestra una alerta en la web si falla."""
@@ -58,7 +85,7 @@ def registrar_evento_github(usuario, accion, cliente="N/A"):
         "fecha_hora": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "usuario": usuario.upper(),
         "accion": accion,
-        "cliente": cliente if cliente else "No especificado"
+        "cliente": cliente if (cliente and cliente != "Seleccionar Cliente...") else "No especificado"
     }
 
     try:
@@ -68,20 +95,19 @@ def registrar_evento_github(usuario, accion, cliente="N/A"):
             sha = file_data['sha']
             content = base64.b64decode(file_data['content']).decode('utf-8')
             df_log = pd.read_csv(StringIO(content))
-
-            # Unimos el nuevo evento
+            
             df_log = pd.concat([df_log, pd.DataFrame([nueva_fila])], ignore_index=True)
 
             csv_actualizado = df_log.to_csv(index=False)
             content_encoded = base64.b64encode(csv_actualizado.encode('utf-8')).decode('utf-8')
 
             payload = {
-                "message": f"Log: {usuario} - {accion}",
-                "content": content_encoded,
-                "branch": BRANCH,
+                "message": f"Log: {usuario} - {accion}", 
+                "content": content_encoded, 
+                "branch": BRANCH, 
                 "sha": sha
             }
-
+            
             requests.put(url_registro, json=payload, headers=headers, timeout=5)
         else:
             st.error(f"❌ No se pudo encontrar el archivo de registros en GitHub. Código: {res.status_code}")
@@ -127,7 +153,15 @@ with col_logo_der:
 
 # --- SIDEBAR: CONFIGURACIÓN ---
 st.sidebar.header("⚙️ Configuración del Reporte")
-razon_social_input = st.sidebar.text_input("Razón Social del Cliente", placeholder="Ej: Agropecuaria El Ombú S.A.")
+
+# --- MODIFICACIÓN: SELECTBOX PARA RAZÓN SOCIAL DESDE GITHUB ---
+lista_clientes_conci = cargar_organizaciones_conci()
+razon_social_seleccionada = st.sidebar.selectbox(
+    "Razón Social del Cliente", 
+    options=lista_clientes_conci,
+    index=0
+)
+
 archivo_subido = st.sidebar.file_uploader("Subir Excel de Cosecha", type=["xlsx", "csv"])
 
 umbral_has = st.sidebar.number_input("Filtrar labores menores a (Has):", min_value=0.0, value=2.0, step=0.5)
