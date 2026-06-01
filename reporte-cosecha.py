@@ -203,7 +203,7 @@ if archivo_subido is not None:
 
         # Logueamos la generación del informe una única vez por sesión cuando cargan la info
         if not st.session_state.log_reporte_enviado:
-            registrar_evento_github(st.session_state.usuario, "Exportó Auditoría de Cosecha a PDF", razon_social_input)
+            registrar_evento_github(st.session_state.usuario, "Exportó Auditoría de Cosecha a PDF", razon_social_seleccionada)
             st.session_state.log_reporte_enviado = True
 
     except Exception as e:
